@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import xtr_dependency_injection
 
 PUBLIC = {
@@ -49,4 +52,7 @@ def test_every_public_name_is_importable() -> None:
 
 
 def test_the_version_comes_from_the_distribution() -> None:
-    assert xtr_dependency_injection.__version__ == "0.1.0"
+    pyproject = Path(__file__).parents[2] / "pyproject.toml"
+    data: dict[str, dict[str, object]] = tomllib.loads(pyproject.read_text())
+
+    assert xtr_dependency_injection.__version__ == data["project"]["version"]
