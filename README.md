@@ -45,7 +45,7 @@ Libraries depend on it through an extra, so using them without a container costs
 
 ```toml
 [project.optional-dependencies]
-di = ["xtr-dependency-injection>=0.1"]
+di = ["xtr-dependency-injection>=1.0,<2"]
 ```
 
 ## The golden path
@@ -433,6 +433,10 @@ Every error derives from `DependencyInjectionError` and carries its data as type
   under `TYPE_CHECKING`.
 
 ## Development
+
+Developed in the [python-xtr](https://github.com/xterr/python-xtr) monorepo, under
+`packages/xtr-dependency-injection`; run the commands below from there. The `python-xtr-dependency-injection` repository is a
+read-only copy, so send issues and pull requests to the monorepo.
 
 ```sh
 uv sync
