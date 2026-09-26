@@ -79,6 +79,18 @@ async def test_an_instance_without_weak_references_is_kept_alive() -> None:
     assert Slotted.calls == 2
 
 
+async def test_a_strongly_held_instance_is_tracked_once() -> None:
+    Slotted.calls = 0
+    instance = Slotted()
+    resetter = ServicesResetter()
+    resetter.track(instance, "reset")
+    resetter.track(instance, "reset")
+
+    await resetter.reset()
+
+    assert Slotted.calls == 1
+
+
 async def test_collected_instances_are_forgotten_without_a_reset() -> None:
     resetter = ServicesResetter()
     for _ in range(1000):

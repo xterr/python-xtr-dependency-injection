@@ -1,4 +1,4 @@
-"""A Symfony-style bundle and kernel layer for the xtr libraries, built on wireup.
+"""A bundle and kernel layer for the xtr libraries, built on wireup.
 
 Each library ships one bundle; installed bundles register themselves; an
 application is one ``Kernel("app")`` line plus decorators. What comes out is a
@@ -11,6 +11,7 @@ from __future__ import annotations
 from importlib.metadata import version
 
 from .builder import Decorates, Definition, Origin, ServiceKey
+from .builder.bundle_active import bundle_active
 from .builder.container_builder import ContainerBuilder
 from .builder.pass_stage import PassStage
 from .builder.service_configurator import ServiceConfigurator
@@ -37,6 +38,7 @@ from .decorator import (
     when_not,
 )
 from .diagnostics import KernelReport
+from .exception._naming import qualified_name
 from .kernel import BootedKernel, CompiledKernel, Kernel, KernelInterface
 from .runtime import ServiceLocator, ServicesResetter, bind_callable
 from .scan import DEFAULT_EXCLUDES
@@ -75,6 +77,7 @@ __all__ = [
     "autoconfigure",
     "autoconfigure_tag",
     "bind_callable",
+    "bundle_active",
     "compiler_pass",
     "configure",
     "env",
@@ -82,6 +85,7 @@ __all__ = [
     "on_boot",
     "on_shutdown",
     "parameters",
+    "qualified_name",
     "remove_if_missing",
     "required_bundle",
     "when",

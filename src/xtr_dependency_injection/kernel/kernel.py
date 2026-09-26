@@ -3,8 +3,7 @@ r"""The kernel: one line for the application, the whole build behind it.
 ``Kernel("app")`` does no work; it is a recipe. ``build()`` runs every step
 below, in order, and returns a compiled container — each call independent of
 the last, so tests and several kernels in one process never share a
-container. Names and semantics follow Symfony 8.2's
-``Symfony\Component\DependencyInjection\Kernel``:
+container. The steps are:
 
 1. environment — ``APP_ENV`` / ``APP_DEBUG`` or the arguments;
 2. bundles — activation from ``bundles.py`` + ``@required_bundle``, in order;
@@ -31,10 +30,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Final, Literal, cast, final
+from typing import TYPE_CHECKING, Literal, cast, final
 
 from xtr_dependency_injection.builder.autoconfigurator import run_autoconfigurators
-from xtr_dependency_injection.builder.autoconfigure_rule import AutoconfigureRule
 from xtr_dependency_injection.builder.conflict_policy import record_alias
 from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.definition import Definition, Origin, ServiceKey
@@ -47,8 +45,16 @@ from xtr_dependency_injection.builder.service_configurator import (
 from xtr_dependency_injection.bundle import KERNEL_BUNDLE, NoConfig
 from xtr_dependency_injection.bundle.bundle import AnyBundle, Bundle
 from xtr_dependency_injection.bundle.bundle_resolver import resolve_bundles
-from xtr_dependency_injection.compiler._wireup_bridge import built_type, key_type
-from xtr_dependency_injection.compiler.registration import _alias_factory, _null_decorator_factory
+from xtr_dependency_injection.compiler._wireup_bridge import key_type
+from xtr_dependency_injection.compiler.check_alias_validity_pass import validate_aliases_pass
+from xtr_dependency_injection.compiler.decorator_service_pass import resolve_decorations_pass
+from xtr_dependency_injection.compiler.priority_tagged_service import by_priority
+from xtr_dependency_injection.compiler.remove_missing_dependencies_pass import (
+    remove_if_missing_pass,
+)
+from xtr_dependency_injection.compiler.resolve_instanceof_conditionals_pass import (
+    apply_autoconfigure_rules,
+)
 from xtr_dependency_injection.compiler.wireup_compiler import (
     Decoration,
     compile_container,
@@ -59,24 +65,11 @@ from xtr_dependency_injection.config.config_resolver import ResolvedConfigs, res
 from xtr_dependency_injection.config.env import env as read_env
 from xtr_dependency_injection.config.parameters import call_parameters, merge_parameters
 from xtr_dependency_injection.decorator.as_alias import aliases_of
-from xtr_dependency_injection.decorator.as_decorator import (
-    DecoratedParameter,
-    OnInvalid,
-    decorated_parameter_of,
-    decorator_of,
-)
 from xtr_dependency_injection.decorator.as_service import service_of
 from xtr_dependency_injection.decorator.as_tagged_item import tagged_item_of
-from xtr_dependency_injection.decorator.autoconfigure import (
-    AutoconfigureMarker,
-    autoconfigure_of,
-    autoconfigure_tags_of,
-)
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass_of
 from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown_of
-from xtr_dependency_injection.decorator.remove_if_missing import (
-    REMOVE_IF_MISSING_TAG,
-)
+from xtr_dependency_injection.decorator.remove_if_missing import REMOVE_IF_MISSING_TAG
 from xtr_dependency_injection.decorator.remove_if_missing import (
     markers_of as remove_if_missing_markers_of,
 )
@@ -84,11 +77,8 @@ from xtr_dependency_injection.diagnostics import DefinitionReport
 from xtr_dependency_injection.diagnostics.report import KernelReport, ReportBuilder
 from xtr_dependency_injection.exception import (
     BundleDefinitionError,
-    ConfigProviderError,
-    DecoratorSignatureError,
     InvalidEnvironmentError,
     ResourceImportError,
-    UnknownServiceError,
 )
 from xtr_dependency_injection.exception._naming import key_name as _naming_key_name
 from xtr_dependency_injection.exception._naming import qualified_name
@@ -96,6 +86,8 @@ from xtr_dependency_injection.scan.default_excludes import DEFAULT_EXCLUDES
 from xtr_dependency_injection.scan.scanned_object import ScannedObject
 from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 
+from ._origins import origin_of as _origin_of
+from ._origins import scanned_origin as _scanned_origin
 from .booted_kernel import BootedKernel, call_injected
 from .compiled_kernel import CompiledKernel
 from .kernel_bundle import KernelBundle
@@ -111,9 +103,6 @@ __all__ = [
     "collect_compiler_passes",
     "definition_reports",
     "prepare",
-    "remove_if_missing_pass",
-    "resolve_decorations_pass",
-    "validate_aliases_pass",
 ]
 
 
@@ -530,7 +519,7 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
 ) -> None:
     """Register the ``kernel.*`` parameters into ``state`` before any bundle's ``build`` runs.
 
-    Symfony 8.2 exposes ``kernel.name``, ``kernel.environment``, ``kernel.debug``,
+    The kernel exposes ``kernel.name``, ``kernel.environment``, ``kernel.debug``,
     ``kernel.project_dir`` and ``kernel.bundles`` (name → class) from the very
     beginning of the container build; every bundle's hook may read them.
     """
@@ -605,9 +594,8 @@ def _late_scan(scanner: Scanner, state: BuildState) -> ScanResult:
 def _marked(state: BuildState, marked: Sequence[ScannedObject]) -> None:
     """Step 7b: definitions for objects carrying ``@as_service`` or ``@as_alias``.
 
-    Runs alongside the existing wireup-``@injectable`` path (which todo 14c
-    will remove). Each object becomes exactly one definition under its own
-    type + qualifier; every ``@as_alias(Iface)`` records an alias
+    Each object becomes exactly one definition under its own type + qualifier;
+    every ``@as_alias(Iface)`` records an alias
     ``(Iface, ...) -> (own_type, own_qualifier)`` in the build state.
     """
     for scanned in marked:
@@ -657,10 +645,11 @@ def _autoconfigure(state: BuildState, candidates: Sequence[ScannedObject]) -> No
     """Step 9: attribute autoconfigurators + nominal ``register_for_autoconfiguration`` rules.
 
     Attribute-based autoconfigurators run first over every service candidate
-    (Symfony ``registerAttributeForAutoconfiguration``); then the nominal
-    rules (Symfony ``registerForAutoconfiguration`` — ``instanceof``) plus any
-    ``@autoconfigure`` / ``@autoconfigure_tag`` markers on scanned classes
-    apply to every non-kernel definition.
+    (see :meth:`ContainerBuilder.register_attribute_for_autoconfiguration`);
+    then the nominal rules registered by
+    :meth:`ContainerBuilder.register_for_autoconfiguration` (subclass match)
+    plus any ``@autoconfigure`` / ``@autoconfigure_tag`` markers on scanned
+    classes apply to every non-kernel definition.
     """
     state.phase = "autoconfigure"
 
@@ -670,132 +659,7 @@ def _autoconfigure(state: BuildState, candidates: Sequence[ScannedObject]) -> No
         return ServiceConfigurator(state, origin)
 
     run_autoconfigurators(state.autoconfigurators, candidates, configurator_for)
-    _apply_autoconfigure_rules(state, candidates)
-
-
-def _apply_autoconfigure_rules(state: BuildState, candidates: Sequence[ScannedObject]) -> None:
-    """Apply every nominal autoconfigure rule to every non-kernel definition.
-
-    Rules come from two sources:
-
-    - ``ContainerBuilder.register_for_autoconfiguration`` — collected into
-      ``state.autoconfigure_rules``.
-    - ``@autoconfigure`` / ``@autoconfigure_tag`` markers on scanned classes —
-      each class turns into a rule keyed on the class itself.
-
-    A rule applies to a definition when the definition's built type has the
-    rule's ``type_`` in its ``__mro__``. Kernel-origin definitions are never
-    autoconfigured (Symfony parity); a tag already present on a definition
-    wins over the rule's — explicit stays. When a rule carries ``factory``
-    (from ``@autoconfigure(factory=…)``), a matched class definition becomes
-    a factory definition using that factory.
-    """
-    rules: list[AutoconfigureRule] = list(state.autoconfigure_rules)
-    marker_rules = _collect_marker_rules(candidates)
-    rules.extend(rule for _marker, rule in marker_rules.values())
-    factories: dict[type, Callable[..., object]] = {
-        cls: marker.factory
-        for cls, (marker, _rule) in marker_rules.items()
-        if marker.factory is not None
-    }
-    if not rules and not factories:
-        return
-    for definition in list(state.store.entries()):
-        if definition.origin.kind == "kernel":
-            continue
-        built = built_type(definition)
-        if built is None:
-            continue
-        mro = built.__mro__
-        for rule in rules:
-            if rule.type_ not in mro:
-                continue
-            _apply_rule_to_definition(rule, definition, built)
-        for cls, factory in factories.items():
-            if cls in mro:
-                _replace_with_factory(state, definition, factory, built)
-
-
-def _collect_marker_rules(
-    candidates: Sequence[ScannedObject],
-) -> dict[type, tuple[AutoconfigureMarker, AutoconfigureRule]]:
-    """Return a rule per scanned class carrying ``@autoconfigure`` or ``@autoconfigure_tag``."""
-    collected: dict[type, tuple[AutoconfigureMarker, AutoconfigureRule]] = {}
-    for candidate in candidates:
-        obj = candidate.obj
-        if not isinstance(obj, type):
-            continue
-        marker = autoconfigure_of(obj)
-        tag_markers = autoconfigure_tags_of(obj)
-        if marker is None and not tag_markers:
-            continue
-        rule = AutoconfigureRule(type_=obj)
-        effective = marker if marker is not None else AutoconfigureMarker()
-        if effective.lifetime is not None:
-            rule.lifetime = effective.lifetime
-        for entry in effective.tags:
-            if isinstance(entry, str):
-                rule.tags.setdefault(entry, []).append({})
-            else:
-                tag_name, attrs = entry
-                rule.tags.setdefault(tag_name, []).append(_as_tag_attrs(attrs))
-        for tm in tag_markers:
-            name = tm.name if tm.name is not None else qualified_name(obj)
-            rule.tags.setdefault(name, []).append(dict(tm.attributes))
-        collected[obj] = (effective, rule)
-    return collected
-
-
-def _as_tag_attrs(attrs: object) -> dict[str, object]:
-    """Normalize a tag-attribute value into a dict, deferring callables via a sentinel."""
-    if callable(attrs) and not isinstance(attrs, Mapping):
-        return {_CALLABLE_ATTRS: attrs}
-    return dict(cast("Mapping[str, object]", attrs))
-
-
-_CALLABLE_ATTRS: Final = "__xtr_autoconfigure_callable__"
-
-
-def _apply_rule_to_definition(rule: AutoconfigureRule, definition: Definition, built: type) -> None:
-    """Apply ``rule`` to ``definition`` in place — tags, lifetime."""
-    for tag_name, attribute_list in rule.tags.items():
-        if definition.has_tag(tag_name):
-            continue
-        for attrs in attribute_list:
-            callable_attrs = attrs.get(_CALLABLE_ATTRS)
-            if callable_attrs is not None:
-                computed = cast("Callable[[type], Mapping[str, object]]", callable_attrs)(built)
-                _ = definition.add_tag(tag_name, **dict(computed))
-            else:
-                _ = definition.add_tag(tag_name, **attrs)
-    if rule.lifetime is not None:
-        definition.lifetime = rule.lifetime
-
-
-def _replace_with_factory(
-    _state: BuildState,
-    definition: Definition,
-    factory: Callable[..., object],
-    built: type,
-) -> None:
-    """Replace a matched class definition with a factory definition — Symfony 8.2 ``factory``.
-
-    Validates that the factory's evaluated return type equals ``built``; else
-    raises :class:`ConfigProviderError` with both types.
-    """
-    if definition.kind != "class":
-        return
-    returned = key_type(factory, None)
-    if returned is not built:
-        raise ConfigProviderError(
-            qualified_name(factory),
-            (
-                f"@autoconfigure(factory=…) return type {qualified_name(returned)} "
-                f"is not the matched class {qualified_name(built)}"
-            ),
-        )
-    definition.provider = factory
-    definition.kind = "factory"
+    apply_autoconfigure_rules(state, candidates)
 
 
 def _run_compiler_passes(
@@ -804,12 +668,12 @@ def _run_compiler_passes(
     scanned_passes: Sequence[ScannedObject],
     scanned_decorators: Sequence[ScannedObject],
 ) -> None:
-    """Run every compiler pass, stage by stage, as Symfony's ``Compiler::compile`` does.
+    """Run every compiler pass, stage by stage.
 
-    Collection order (Symfony 8.1 bundle-as-CompilerPass + app + built-ins):
-    for each active bundle in order — its ``process`` if the class overrides
-    ``Bundle.process``, then whatever it added in ``build`` via
-    ``builder.add_compiler_pass``; then the application's scanned
+    Collection order — bundle-as-compiler-pass, then application, then
+    built-ins: for each active bundle in order — its ``process`` if the
+    class overrides ``Bundle.process``, then whatever it added in ``build``
+    via ``builder.add_compiler_pass``; then the application's scanned
     ``@compiler_pass`` functions in scan order; then the built-in kernel
     passes. Execution follows :class:`PassStage` — one stage at a time —
     and within a stage by priority descending, ties by collection order.
@@ -828,10 +692,10 @@ def collect_compiler_passes(
 ) -> list[CompilerPassRequest]:
     """Return every compiler pass to run, in collection order.
 
-    Collection follows Symfony's ``PassConfig::getPasses``: bundles' own
-    ``process`` (only when overridden), then the passes each bundle added
-    via ``builder.add_compiler_pass``, then application ``@compiler_pass``
-    functions in scan order, then the built-in kernel passes.
+    Collection order: bundles' own ``process`` (only when overridden),
+    then the passes each bundle added via ``builder.add_compiler_pass``,
+    then application ``@compiler_pass`` functions in scan order, then the
+    built-in kernel passes.
     """
     collected: list[CompilerPassRequest] = []
 
@@ -856,7 +720,7 @@ def collect_compiler_passes(
 
     for bundle in bundles:
         name = type(bundle).metadata().name
-        if type(bundle).process is not Bundle.process:
+        if _overrides(bundle, "process"):
             append(
                 bundle.process,
                 stage=PassStage.BEFORE_OPTIMIZATION,
@@ -914,279 +778,15 @@ def collect_compiler_passes(
 
 
 def _sorted_passes(requests: Sequence[CompilerPassRequest]) -> list[CompilerPassRequest]:
-    """Sort ``requests`` by stage, then priority descending, ties by collection order."""
+    """Sort ``requests`` by stage, then priority descending, ties by collection order.
+
+    Priority and collection order are handled by the shared :func:`by_priority`
+    helper; the stage stays the primary key on top, applied as a stable sort
+    over the priority-ordered result so within-stage order is preserved.
+    """
+    ranked = by_priority(requests, priority=lambda r: r.priority, order=lambda r: r.order)
     stage_order = {stage: index for index, stage in enumerate(PassStage)}
-    return sorted(requests, key=lambda r: (stage_order[r.stage], -r.priority, r.order))
-
-
-def resolve_decorations_pass(
-    builder: ContainerBuilder, scanned_decorators: Sequence[ScannedObject]
-) -> None:
-    """OPTIMIZE built-in: build ``state.decorations`` from decoration requests.
-
-    Reads every ``Definition.decorates`` set through ``set_decorated_service``
-    and every scanned ``@as_decorator`` marker, sorts them by priority
-    (highest wraps the original first), populates ``state.decorations`` and
-    removes each decorator definition from its own key so the decorator lives
-    only under the target's key (Symfony's ``DecoratorServicePass`` swaps the
-    id).
-
-    ``on_invalid`` (Symfony's ``AsDecorator::$onInvalid``) chooses what
-    happens when the target is not defined:
-
-    - :attr:`OnInvalid.EXCEPTION` raises :class:`UnknownServiceError`;
-    - :attr:`OnInvalid.IGNORE` drops the decorator silently;
-    - :attr:`OnInvalid.NULL` keeps the decorator under the target key and
-      injects ``None`` for its ``AutowireDecorated`` parameter (the
-      annotation must be ``T | None``).
-
-    Raises:
-        UnknownServiceError: :attr:`OnInvalid.EXCEPTION` and target missing.
-        DecoratorSignatureError: The decorator has none, several, or one
-            ``Annotated[..., AutowireDecorated()]`` parameter of the wrong
-            type - or :attr:`OnInvalid.NULL` on a parameter that does not
-            allow ``None``.
-    """
-    state = builder._state  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] — the built-in pass reads state directly.
-    requests = _collect_pending_decorations(state, scanned_decorators)
-    for request in sorted(requests, key=lambda r: (-r.priority, r.order)):
-        target = state.store.get(request.key)
-        if target is None and request.on_invalid is OnInvalid.EXCEPTION:
-            raise UnknownServiceError(request.key, "decorate")
-        if target is None and request.on_invalid is OnInvalid.IGNORE:
-            _remove_own_key(state, request.own_key)
-            continue
-        parameter = decorated_parameter_of(request.decorator, request.key[0])
-        _remove_own_key(state, request.own_key)
-        if target is None:
-            _register_null_decorator(state, request, parameter)
-            continue
-        state.decorations.setdefault(request.key, []).append(
-            Decoration(request.decorator, parameter.name, request.name)
-        )
-
-
-def _collect_pending_decorations(
-    state: BuildState, scanned_decorators: Sequence[ScannedObject]
-) -> list[_PendingDecoration]:
-    """Gather decorations from ``set_decorated_service`` and scanned ``@as_decorator``."""
-    requests: list[_PendingDecoration] = []
-    order = 0
-    for definition in state.store.entries():
-        if definition.decorates is None:
-            continue
-        requests.append(
-            _PendingDecoration(
-                key=definition.decorates.key,
-                decorator=cast("type | Callable[..., object]", definition.provider),
-                priority=definition.decorates.priority,
-                on_invalid=definition.decorates.on_invalid,
-                name=qualified_name(definition.provider),
-                order=order,
-                own_key=definition.key,
-                origin=definition.origin,
-            )
-        )
-        order += 1
-    for scanned in scanned_decorators:
-        marker = decorator_of(scanned.obj)
-        if marker is None:
-            continue
-        requests.append(
-            _PendingDecoration(
-                key=(marker.target, marker.qualifier),
-                decorator=cast("type | Callable[..., object]", scanned.obj),
-                priority=marker.priority,
-                on_invalid=marker.on_invalid,
-                name=scanned.name,
-                order=order,
-                own_key=None,
-                origin=_scanned_origin(scanned),
-            )
-        )
-        order += 1
-    return requests
-
-
-def _remove_own_key(state: BuildState, own_key: ServiceKey | None) -> None:
-    """Drop the decorator's own-key definition so it lives only under the target key."""
-    if own_key is None:
-        return
-    if state.store.get(own_key) is not None:
-        state.store.remove(own_key)
-
-
-def _register_null_decorator(
-    state: BuildState, request: _PendingDecoration, parameter: DecoratedParameter
-) -> None:
-    """Register a decorator under a missing target with ``None`` for its inner parameter."""
-    if not parameter.allows_none:
-        raise DecoratorSignatureError(
-            request.name,
-            (
-                "on_invalid=OnInvalid.NULL requires the AutowireDecorated parameter "
-                f"{parameter.name!r} to allow None (annotate it as T | None)"
-            ),
-        )
-    target_type, _ = request.key
-    factory = _null_decorator_factory(request.decorator, parameter.name, target_type)
-    state.store.add(
-        Definition(
-            key=request.key,
-            provider=factory,
-            kind="factory",
-            lifetime="singleton",
-            origin=Origin(
-                request.origin.kind,
-                request.origin.name,
-                f"decorator of missing {qualified_name(target_type)}",
-            ),
-        )
-    )
-
-
-def remove_if_missing_pass(builder: ContainerBuilder) -> None:
-    """BEFORE_REMOVING built-in: drop every definition whose ``container.remove_if_missing`` fails.
-
-    Port of Symfony 8.2's ``RemoveMissingDependenciesPass`` (see
-    ``.tmp/symfony/src/Symfony/Component/DependencyInjection/Compiler/RemoveMissingDependenciesPass.php``
-    at commit ``5b23e4e``). A tag has ``service=<type>`` (with optional
-    ``qualifier=``), ``class_="module:Class"`` and/or ``package="dist"``;
-    every tag on a definition must hold, and every attribute of a tag must
-    hold. Removing one definition can invalidate another's tag, so the pass
-    sweeps until it settles. When a definition is dropped, any alias
-    pointing at it is dropped too (Symfony parity).
-    """
-    state = builder._state  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] — the built-in pass reads state directly.
-    tagged: dict[ServiceKey, list[dict[str, object]]] = {
-        definition.key: definition.get_tag(REMOVE_IF_MISSING_TAG)
-        for definition in state.store.entries()
-        if definition.has_tag(REMOVE_IF_MISSING_TAG)
-    }
-    if not tagged:
-        return
-    while True:
-        removed = False
-        for key in list(tagged):
-            if state.store.get(key) is None:
-                del tagged[key]
-                continue
-            for tag in tagged[key]:
-                if _remove_if_missing_holds(state, tag):
-                    continue
-                _remove_with_aliases(state, key)
-                del tagged[key]
-                removed = True
-                break
-        if not removed:
-            break
-
-
-def _remove_if_missing_holds(state: BuildState, tag: Mapping[str, object]) -> bool:
-    """Return whether every attribute of ``tag`` holds — Symfony's ``holds``."""
-    service = tag.get("service")
-    if service is not None:
-        qualifier = tag.get("qualifier")
-        if not _alias_or_definition_of(state, (cast("type", service), qualifier)):
-            return False
-    class_path = tag.get("class_")
-    if class_path is not None and not _class_importable(cast("str", class_path)):
-        return False
-    package = tag.get("package")
-    return not (package is not None and not _package_installed(cast("str", package)))
-
-
-def _alias_or_definition_of(state: BuildState, key: ServiceKey) -> bool:
-    """Return whether ``key`` resolves — follows aliases without looping."""
-    seen: set[ServiceKey] = set()
-    while key in state.aliases and key not in seen:
-        seen.add(key)
-        key = state.aliases[key]
-    return state.store.get(key) is not None
-
-
-def _class_importable(path: str) -> bool:
-    """Return whether ``"module:Class"`` resolves — imports lazily and swallows failure."""
-    module, _, attribute = path.partition(":")
-    if not module or not attribute:
-        return False
-    try:
-        loaded = importlib.import_module(module)
-    except ImportError:
-        return False
-    return hasattr(loaded, attribute)
-
-
-def _package_installed(name: str) -> bool:
-    """Return whether ``name`` is an installed distribution."""
-    # Local import to keep the module import graph minimal.
-    from importlib.metadata import PackageNotFoundError, distribution  # noqa: PLC0415
-
-    try:
-        _ = distribution(name)
-    except PackageNotFoundError:
-        return False
-    return True
-
-
-def _remove_with_aliases(state: BuildState, key: ServiceKey) -> None:
-    """Drop ``key`` from the store and every alias pointing at it (recursively)."""
-    if state.store.get(key) is not None:
-        state.store.remove(key)
-    dangling = [alias for alias, target in state.aliases.items() if target == key]
-    for alias in dangling:
-        del state.aliases[alias]
-        _ = state.alias_origins.pop(alias, None)
-        _remove_with_aliases(state, alias)
-
-
-def validate_aliases_pass(builder: ContainerBuilder) -> None:
-    """AFTER_REMOVING built-in: turn each alias into a forwarding definition and freeze.
-
-    Every ``(alias_key -> target_key)`` becomes a factory definition producing
-    the target's instance under the alias key (Symfony's ``setAlias``). A
-    missing target — a raised ``UnknownServiceError`` — means an
-    ``@as_alias`` (or an explicit ``set_alias``/``alias``) that referred to
-    a service that never existed, or that a preceding ``BEFORE_REMOVING``
-    pass removed the target without dropping the alias.
-
-    Raises:
-        UnknownServiceError: If an alias target is not defined.
-    """
-    state = builder._state  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] — the built-in pass reads state directly.
-    for alias_key, target_key in state.aliases.items():
-        if state.store.get(alias_key) is not None:
-            continue
-        target = state.store.get(target_key)
-        if target is None:
-            raise UnknownServiceError(alias_key, "set_alias")
-        alias_type, alias_qualifier = alias_key
-        target_type, target_qualifier = target_key
-        factory = _alias_factory(alias_type, target_type, target_qualifier)
-        state.store.add(
-            Definition(
-                key=(alias_type, alias_qualifier),
-                provider=factory,
-                kind="factory",
-                lifetime=target.lifetime,
-                origin=Origin(target.origin.kind, target.origin.name, "alias"),
-            )
-        )
-    state.phase = "frozen"
-
-
-@dataclass(frozen=True, slots=True)
-class _PendingDecoration:
-    """Internal record of one decoration to apply, gathered by :func:`resolve_decorations_pass`."""
-
-    key: ServiceKey
-    decorator: type | Callable[..., object]
-    priority: int
-    on_invalid: OnInvalid
-    name: str
-    order: int
-    own_key: ServiceKey | None
-    origin: Origin
+    return sorted(ranked, key=lambda r: stage_order[r.stage])
 
 
 def definition_reports(
@@ -1219,28 +819,18 @@ def definition_reports(
 def _hooks(
     scanned: Sequence[ScannedObject], marker_of: Callable[[object], object]
 ) -> list[Callable[..., object]]:
-    return [cast("Callable[..., object]", s.obj) for s in _by_priority(scanned, marker_of)]
+    """Return the ``scanned`` hooks by marker priority, highest first, then scan order."""
+    ranked = by_priority(
+        scanned,
+        priority=lambda entry: cast("int", getattr(marker_of(entry.obj), "priority", 0)),
+        order=lambda entry: entry.order,
+    )
+    return [cast("Callable[..., object]", entry.obj) for entry in ranked]
 
 
-def _by_priority(
-    scanned: Sequence[ScannedObject], marker_of: Callable[[object], object]
-) -> list[ScannedObject]:
-    """Return ``scanned`` by marker priority, highest first, then scan order."""
-
-    def priority(entry: ScannedObject) -> int:
-        return cast("int", getattr(marker_of(entry.obj), "priority", 0))
-
-    return sorted(scanned, key=lambda entry: (-priority(entry), entry.order))
-
-
-def _origin_of(bundle: str) -> Origin:
-    return Origin("kernel", bundle) if bundle == KERNEL_BUNDLE else Origin("bundle", bundle)
-
-
-def _scanned_origin(scanned: ScannedObject) -> Origin:
-    if scanned.owner is None:
-        return Origin("app", scanned.name)
-    return Origin("bundle", scanned.owner, f"compiler pass {scanned.name}")
+def _overrides(bundle: AnyBundle, method: str) -> bool:
+    """Return whether ``bundle``'s class overrides ``Bundle.<method>`` rather than inheriting it."""
+    return getattr(type(bundle), method) is not getattr(Bundle, method)
 
 
 def _package_dir(package: str | ModuleType) -> Path:
@@ -1257,9 +847,8 @@ def _package_dir(package: str | ModuleType) -> Path:
 def _load_bundles_module(package_name: str) -> Mapping[type[AnyBundle], Mapping[str, bool]]:
     """Import ``<package_name>.bundles`` and return its ``BUNDLES`` mapping.
 
-    The convention mirrors Symfony's ``config/bundles.php``: the module is
-    optional (a missing ``<package_name>.bundles`` yields an empty mapping),
-    but a module that does exist must expose ``BUNDLES``.
+    The module is optional (a missing ``<package_name>.bundles`` yields an
+    empty mapping), but a module that does exist must expose ``BUNDLES``.
 
     Raises:
         ResourceImportError: If ``<package_name>.bundles`` exists but a

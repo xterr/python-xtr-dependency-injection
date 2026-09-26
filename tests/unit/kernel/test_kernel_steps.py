@@ -14,6 +14,8 @@ from xtr_dependency_injection.builder.service_configurator import (
     ServiceConfigurator,
 )
 from xtr_dependency_injection.bundle import Bundle, as_bundle
+from xtr_dependency_injection.compiler.check_alias_validity_pass import validate_aliases_pass
+from xtr_dependency_injection.compiler.decorator_service_pass import resolve_decorations_pass
 from xtr_dependency_injection.compiler.wireup_compiler import Decoration
 from xtr_dependency_injection.config.config_resolver import resolve_configs
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass
@@ -34,8 +36,6 @@ from xtr_dependency_injection.kernel.kernel import (
     _load,
     _run_compiler_passes,
     definition_reports,
-    resolve_decorations_pass,
-    validate_aliases_pass,
 )
 from xtr_dependency_injection.kernel.kernel_bundle import KernelBundle
 from xtr_dependency_injection.scan.default_excludes import DEFAULT_EXCLUDES

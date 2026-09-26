@@ -2,7 +2,7 @@
 
 # xtr-dependency-injection
 
-**A Symfony 8.2-style bundle and kernel layer for Python, compiled to a wireup container.**
+**A bundle and kernel layer for Python, compiled to a wireup container.**
 
 <img alt="python 3.11+" src="https://img.shields.io/badge/python-%E2%89%A5%203.11-3776AB?logo=python&logoColor=white">
 <img alt="core dependencies: 3" src="https://img.shields.io/badge/core%20deps-3-3FB950">
@@ -19,15 +19,15 @@ Every library that wants to live in a container ends up shipping its own service
 helper, its own "import this before building the container" rule, and its own way of asking
 whether a peer is there. The application then glues five of them together by hand.
 
-This package does for Python what Symfony's bundles do for PHP: **each library ships one
-bundle, the application lists the bundles it wants, and everything else is one line.** It is
-not a container: [wireup](https://github.com/maldoinc/wireup) is. This package decides *what*
-goes into wireup, in *which order*, *for which environment*, and runs the lifecycle around it.
+This package gives each library one integration seam: **each library ships one bundle, the
+application lists the bundles it wants, and everything else is one line.** It is not a
+container: [wireup](https://github.com/maldoinc/wireup) is. This package decides *what* goes
+into wireup, in *which order*, *for which environment*, and runs the lifecycle around it.
 
-The runtime surface follows Symfony 8.2 (`AbstractBundle`, `ContainerBuilder`, `Definition`,
-`ServicesConfigurator`, `PassConfig`, `#[Autoconfigure]`, `#[AsDecorator]`,
-`#[RequiredBundle]`), in Python. The engine is hidden behind `ContainerInterface` — the
-application, and every library that ships a bundle, never imports wireup.
+The runtime surface is a small Python API — `Bundle`, `ContainerBuilder`, `Definition`,
+`ServiceConfigurator`, `PassStage`, `@autoconfigure`, `@as_decorator`, `@required_bundle`.
+The engine is hidden behind `ContainerInterface` — the application, and every library that
+ships a bundle, never imports wireup.
 
 - 🐍 **Python-first configuration** — typed config objects and `@configure` functions, no files.
 - 📜 **Listed and required** — the application lists root bundles in `<package>/bundles.py`; required peers arrive through `@required_bundle`.
@@ -170,8 +170,8 @@ BUNDLES = {
 }
 ```
 
-A bundle declares peers with the repeatable `@required_bundle` decorator, mirroring Symfony
-8.2's `#[RequiredBundle]`. Required bundles are pulled in recursively; a required class
+A bundle declares peers with the repeatable `@required_bundle` decorator. Required bundles
+are pulled in recursively; a required class
 inherits the requirer's activity in each environment. A string `"module:Class"` target is
 imported lazily by the resolver, and with `ignore_on_invalid=True` is skipped silently when
 its module is not installed.
@@ -235,7 +235,7 @@ class MailBundle(Bundle[MailConfig]):
 - `resources` are scanned like the application. A bundle whose only job is to contribute
   commands or handlers is an empty class with `resources=("acme_tools.commands",)`.
 
-The hooks, all optional, run in dependency order after Symfony 8.2's `AbstractBundle`:
+The hooks, all optional, run in dependency order:
 
 | Hook | Runs during | Purpose |
 |---|---|---|
@@ -252,6 +252,11 @@ use**: bind handlers and check signatures in `boot` when that is cheap.
 
 The kernel registers every active bundle's resolved config under its type, so any service can
 inject `MailConfig` directly. A bundle never registers its own config.
+
+Each xtr library re-exports its config class from its `<pkg>.bundle` module alongside the
+bundle, so an application configures it with a single import — `from xtr_messenger.bundle
+import MessageBusConfig`, `from xtr_logging.bundle import LoggingConfig`, and likewise for
+`xtr_clock.bundle` and `xtr_console.bundle`. All four do this.
 
 ### The zero-config contract
 
@@ -311,8 +316,8 @@ type. An unknown name / type is an error; an env-disabled target is skipped and 
 
 ### `AliasOf` — forwarding a config key
 
-Symfony 8.2's `NodeDefinition::aliasOf` in Python: a bundle whose config exposes a field
-`Annotated[C | None, AliasOf("target")]` forwards its non-`None` value to bundle `target`.
+A bundle whose config exposes a field `Annotated[C | None, AliasOf("target")]` forwards its
+non-`None` value to bundle `target`.
 Configs then resolve in bundle topological order extended by owner → target edges. A conflict
 with an app base provider raises `ConflictingConfigProvidersError` naming both sources.
 
@@ -349,17 +354,19 @@ class Site:
 
 ### `env()`
 
-`env(name, cast=str, *, default=...)` reads the environment while the kernel builds. `bool`
-reads `1/true/yes/on` and `0/false/no/off`. Overloaded so `env("PORT", int, default=None)`
-type-checks as `int | None`:
+`env(name, cast=str, *, default=...)` reads the environment while the kernel builds. It is
+overloaded so the return type follows `cast` and `default`: `env("PORT", int)` is `int`,
+`env("PORT", int, default=None)` is `int | None`, and `env("HOST")` is `str`. `bool` is the
+one `cast` not applied as `bool(value)` (which is truthy for every non-empty string): it
+reads `1/true/yes/on` for true and `0/false/no/off` or empty for false, case-insensitively.
 
 ```python
 value: str | None = env("SMTP_PASSWORD", default=None)
 port: int = env("SMTP_PORT", int, default=25)
 ```
 
-Missing without a default raises `MissingEnvironmentVariableError`; a bad cast raises
-`InvalidEnvironmentVariableError`.
+Missing without a default raises `MissingEnvironmentVariableError`; a bad cast (including a
+`bool` value that is neither true nor false) raises `InvalidEnvironmentVariableError`.
 
 ## Scanning and autoconfiguration
 
@@ -375,12 +382,11 @@ functions and classes a module *defines*. Each goes to exactly one place:
 | `@as_service`, `@as_alias`, `@as_tagged_item` | a definition, and a service candidate |
 | anything else | a service candidate |
 
-Service candidates are what bundles' **autoconfigurators** see. There are two flavours,
-mirroring Symfony 8.2 exactly:
+Service candidates are what bundles' **autoconfigurators** see. There are two flavours:
 
 `ContainerBuilder.register_for_autoconfiguration(type)` returns a rule that tags every
-definition whose built type has `type` in `__mro__` (nominal, Symfony `instanceof`). The
-core bundle uses it for `ResetInterface`:
+definition whose built type has `type` in `__mro__` (nominal, by base type). The core bundle
+uses it for `ResetInterface`:
 
 ```python
 def build(self, builder: ContainerBuilder) -> None:
@@ -412,39 +418,38 @@ class Plugin: ...
 class Strategy: ...  # every subclass tagged app.strategy
 ```
 
-`@autoconfigure(tags=..., lifetime=..., factory=...)` — 8.2 semantics: a callable
-tag-attribute value is called once per concrete built class and returns the attribute
-mapping; `factory` turns a matched class definition into a factory definition.
+`@autoconfigure(tags=..., lifetime=..., factory=...)`: a callable tag-attribute value is
+called once per concrete built class and returns the attribute mapping; `factory` turns a
+matched class definition into a factory definition.
 
 A bundle can scan a module only when a peer is active: `services.load("pkg.commands")` in
 `load_extension` runs after every bundle has loaded (the late scan).
 
 ## Definitions and compiler passes
 
-`ContainerBuilder` mirrors Symfony's — the same method names, one method one purpose:
+`ContainerBuilder` — one method one purpose:
 
-| Method | Symfony counterpart |
+| Method | Does |
 |---|---|
-| `register(service, *, qualifier=, lifetime=)` | `register()` |
-| `set_definition(definition)` | `setDefinition()` |
-| `get_definition(service, qualifier=)` | `getDefinition()` |
-| `has_definition(service, qualifier=)` | `hasDefinition()` |
-| `find_definition(service, qualifier=)` | `findDefinition()` (follows aliases) |
-| `remove_definition(service, qualifier=)` | `removeDefinition()` |
-| `get_definitions()` | `getDefinitions()` |
-| `set_alias(alias, target, *, alias_qualifier=, target_qualifier=)` | `setAlias()` |
-| `get_alias / has_alias / remove_alias` | idem |
-| `has(service, qualifier=)` | `has()` (definition or alias) |
-| `find_tagged_service_ids(tag)` | `findTaggedServiceIds()` |
-| `get_parameter / has_parameter / set_parameter` | `getParameter / hasParameter / setParameter` |
-| `add_compiler_pass(fn, *, stage=, priority=)` | `addCompilerPass()` |
-| `register_for_autoconfiguration(type)` | `registerForAutoconfiguration()` |
-| `register_attribute_for_autoconfiguration(reader, callback)` | `registerAttributeForAutoconfiguration()` |
-| `prepend_extension_config(bundle, transform)` | `prependExtensionConfig()` |
-| `get_extension_config(bundle)` | `getExtensionConfig()` |
+| `register(service, *, qualifier=, lifetime=)` | Register a new definition and return it |
+| `set_definition(definition)` | Store a fully-built `Definition` |
+| `get_definition(service, qualifier=)` | Fetch a definition by key |
+| `has_definition(service, qualifier=)` | Test whether a definition exists |
+| `find_definition(service, qualifier=)` | Resolve aliases and return the underlying definition |
+| `remove_definition(service, qualifier=)` | Drop a definition |
+| `get_definitions()` | All definitions |
+| `set_alias(alias, target, *, alias_qualifier=, target_qualifier=)` | Point one key at another |
+| `get_alias / has_alias / remove_alias` | Read / test / drop an alias |
+| `has(service, qualifier=)` | Definition or alias present |
+| `find_tagged_service_ids(tag)` | Every definition carrying a tag |
+| `get_parameter / has_parameter / set_parameter` | Read / test / write a parameter |
+| `add_compiler_pass(fn, *, stage=, priority=)` | Register a compiler pass at a stage |
+| `register_for_autoconfiguration(type)` | Nominal autoconfiguration rule by base type |
+| `register_attribute_for_autoconfiguration(reader, callback)` | Marker-based autoconfiguration |
+| `prepend_extension_config(bundle, transform)` | Transform another bundle's config |
+| `get_extension_config(bundle)` | Read another bundle's current config |
 
-Inside `load_extension`, a bundle registers services on the `ServiceConfigurator` (a subset
-of Symfony's `ServicesConfigurator::services()`):
+Inside `load_extension`, a bundle registers services on the `ServiceConfigurator`:
 
 - `services.set(cls_or_factory, *, qualifier=, lifetime="singleton")`
 - `services.instance(obj, *, qualifier=)` — provide `obj` itself under `(type(obj), qualifier)`
@@ -458,7 +463,7 @@ Methods on it: `add_tag(name, **attributes)`, `has_tag(name)`, `get_tag(name)`,
 
 ### `PassStage`
 
-Compiler passes run in Symfony's five stages, priority descending within a stage:
+Compiler passes run in five stages, priority descending within a stage:
 
 ```python
 from xtr_dependency_injection import PassStage, compiler_pass
@@ -474,8 +479,9 @@ The stages are: `BEFORE_OPTIMIZATION`, `OPTIMIZE`, `BEFORE_REMOVING`, `REMOVE`,
 
 ### `@remove_if_missing`
 
-Symfony 8.2's `container.remove_if_missing` tag as a decorator. A service tagged this way is
-dropped by the built-in `BEFORE_REMOVING` pass when any of its conditions is unmet:
+Drops a service when a peer it needs is absent. A service tagged this way (tag name
+`container.remove_if_missing`) is dropped by the built-in `BEFORE_REMOVING` pass when any of
+its conditions is unmet:
 
 ```python
 from xtr_dependency_injection import as_service, remove_if_missing
@@ -491,20 +497,22 @@ class MetricsMiddleware: ...
 class PrometheusExporter: ...
 ```
 
-Exactly one of `service=` / `class_=` / `package=` per tag; the decorator is repeatable, and
-every tag on a definition must hold for the definition to survive.
+`service=` / `class_=` / `package=` are each an independent condition, and any non-empty
+combination may be given in one call (an empty call is a `TypeError`); the decorator is
+repeatable, and every tag on a definition must hold for the definition to survive.
 
-**Deviation**: at the pass level, `package=` is checked independently of `class_=` —
-`importlib.metadata.distribution(package)` runs as its own condition. The decorator surface
-currently requires `class_=` alongside `package=`; the pass, however, evaluates each attribute
-(`service`, `class_`, `package`) as an independent condition, so a package check fires on its
-own even when the class is importable.
+**Notes:**
+
+- `service=`, `class_=` and `package=` are each their own condition, evaluated independently;
+  any non-empty combination may be given in one call and every condition must hold.
+- `class_` carries a trailing underscore because `class` is a Python keyword.
+- There is no `parent_packages` condition.
 
 ## Overrides and decoration
 
-The application overrides a bundle's service by defining the same key — silently, as in
-Symfony, and recorded in the report. Two bundles defining one key is an error unless one
-calls `builder.set_definition(...)` in `process`.
+The application overrides a bundle's service by defining the same key — silently, and
+recorded in the report. Two bundles defining one key is an error unless one calls
+`builder.set_definition(...)` in `process`.
 
 A decorator takes a service's place and receives the original through
 `Annotated[T, AutowireDecorated()]`:
@@ -535,8 +543,7 @@ When the target is missing, `on_invalid=OnInvalid.EXCEPTION` (the default) fails
 ## Container access
 
 The kernel-provided container implements `ContainerInterface` from `xtr-service-contracts`
-(Symfony's `Symfony\Component\DependencyInjection\ContainerInterface` — PSR-11 plus
-parameters):
+(get / has by type plus qualifier, and named parameters):
 
 ```python
 from xtr_service_contracts import ContainerInterface
@@ -550,9 +557,26 @@ async def use(container: ContainerInterface) -> None:
     name = container.get_parameter("kernel.name")
 ```
 
-**Deviation from Symfony**: keys are `(type, qualifier)`, where Symfony uses the class name
-as the id plus an optional named alias (`Type $name`, `#[Target]`). Every id is a type; every
-alias becomes a qualifier.
+Services are keyed by `(type, qualifier)`: every id is a type, and an optional qualifier
+selects between multiple registrations of the same type.
+
+`container.get(T)` returns a singleton directly. When the service is registered
+(`container.has(T)` is true) but the engine cannot build it, `get` raises a
+`ServiceResolutionError` whose `.reason` is the engine's own message and whose message reads
+`failed to resolve <T>: <engine message>`, with the engine error kept as `__cause__`. A
+`lifetime="scoped"` or `lifetime="transient"` service exists only inside a scope, so asking
+for one from the container is refused: those services are built inside a scope, so resolve
+them from an injected callable, or from `bind_callable(container, target, per_call_scope=True)`
+— the `ServiceResolutionError` for a scope mismatch says exactly that.
+
+A service that asks for a dependency the container has no definition for does not fail
+obscurely at build: the compiler raises a `ContainerCompilationError` whose message reads
+`<Owner>.<param> needs <Type>, which is not a registered service: mark it @as_service (or
+alias it with @as_alias), or register it in a bundle's load_extension` — and `<Type>['q']`
+when the dependency wanted a qualifier. The engine error stays reachable as `__cause__`, and
+any origin notes the compiler attached (naming where each mentioned definition came from) are
+preserved. The fix is the named `@as_service`, `services.set(...)` or alias — not a stack
+trace from the engine.
 
 Constructor injection uses our own markers, compiled to the engine:
 
@@ -629,7 +653,7 @@ because wireup throws a scope's error into the generator.
 
 ### `kernel.reset`
 
-Symfony 8.2's reset tag. The core bundle calls
+Reset between messages. The core bundle calls
 `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")`,
 so any service explicitly inheriting `ResetInterface` (from `xtr-service-contracts`) is reset
 by `ServicesResetter` between messages. A service opts in explicitly with
@@ -651,10 +675,9 @@ async def between_messages(container: ContainerInterface) -> None:
     await resetter.reset()
 ```
 
-Ordering — `@as_tagged_item(index=, priority=, before=, after=)` — mirrors Symfony 8.2's
-`BeforeAfterSorter` verbatim: collection order = global priority desc, ties broken by
-`before` / `after` constraints. A contradiction, unsatisfiable bound or cycle raises
-`ServiceOrderError`.
+Ordering — `@as_tagged_item(index=, priority=, before=, after=)`: collection order = global
+priority desc, ties broken by `before` / `after` constraints. A contradiction, unsatisfiable
+bound or cycle raises `ServiceOrderError`.
 
 ## Testing
 
@@ -723,53 +746,63 @@ parameters need the kernel — wireup's `config=` stays the caller's.
 
 Everywhere else, the public API stays behind `ContainerInterface`.
 
-## Symfony 8.2 mapping
+## Concepts
 
-| Symfony 8.2 | xtr-dependency-injection |
-|---|---|
-| `AbstractBundle` | `Bundle[ConfigT]` + `@as_bundle(...)`: `build` / `prepend_extension` / `load_extension` / `process` |
-| `#[RequiredBundle(ignoreOnInvalid: ...)]` | `@required_bundle(target, ignore_on_invalid=...)` |
-| `config/bundles.php` per env | `<package>/bundles.py` `BUNDLES = {Bundle: {"env": True}}` |
-| Bundle config tree | A typed config class with defaults; `__post_init__` validates |
-| `config/packages/*.yaml` | `@configure` functions |
-| `#[When]` / `#[WhenNot]` | `@when("prod")` / `@when_not("prod")` |
-| `parameters:` / `%env(X)%` | `@parameters` / `env("X", int, default=...)` |
-| `NodeDefinition::aliasOf()` | `Annotated[C \| None, AliasOf("target")]` |
-| `resource: '../src/'` + autoconfigure | The kernel scan + `services.load(...)` |
-| `ContainerBuilder::registerForAutoconfiguration` | `builder.register_for_autoconfiguration(T)` |
-| `ContainerBuilder::registerAttributeForAutoconfiguration` | `builder.register_attribute_for_autoconfiguration(reader, callback)` |
-| `#[Autoconfigure]` / `#[AutoconfigureTag]` | `@autoconfigure(...)` / `@autoconfigure_tag(...)` |
-| `ContainerConfigurator::services()` — `set / instance / alias / load` | `services.set / instance / alias / load` |
-| `#[AsAlias]` | `@as_alias(alias, *, qualifier=)` |
-| `#[AsTaggedItem(index, priority)]` + `BeforeAfterSorter` | `@as_tagged_item(index=, priority=, before=, after=)` |
-| `Compiler\PassConfig::TYPE_*` | `PassStage.BEFORE_OPTIMIZATION / OPTIMIZE / BEFORE_REMOVING / REMOVE / AFTER_REMOVING` |
-| `Bundle::process()` / compiler passes | `Bundle.process(builder)` + `@compiler_pass(stage=, priority=)` |
-| `container.remove_if_missing` tag | `@remove_if_missing(service= / class_= / package=)` |
-| `#[AsDecorator(decorates, priority, onInvalid)]` + `#[AutowireDecorated]` | `@as_decorator(T, priority=, on_invalid=OnInvalid.*)` + `Annotated[T, AutowireDecorated()]` |
-| `#[Autowire(param:)]` / `#[Target]` | `Autowire(param=...)` / `Target(name)` |
-| Tagged iterator / locator | `Sequence[T]` / `Mapping[Hashable, T]` / `ServiceLocator` |
-| `kernel.reset` autoconfigured on `ResetInterface` | `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")` |
-| `Bundle::boot()` / `shutdown()` + `setContainer()` | `async Bundle.boot()` / `async Bundle.shutdown()` reading `self.container`; `@on_boot` / `@on_shutdown` |
-| `ContainerInterface` (PSR-11 + parameters) | `xtr_service_contracts.ContainerInterface` — kernel-provided |
-| `ServiceLocator` (`ServiceCollectionInterface`) | `xtr_dependency_injection.ServiceLocator` |
-| `debug:container` / `debug:config` | `CompiledKernel.report`, `debug:*` commands |
+| Concept | Our API | What it does |
+|---|---|---|
+| Bundle | `Bundle[ConfigT]` + `@as_bundle(...)`: `build` / `prepend_extension` / `load_extension` / `process` | One integration seam per library |
+| Required peer | `@required_bundle(target, ignore_on_invalid=...)` | Pull another bundle in recursively |
+| Root bundle list | `<package>/bundles.py` `BUNDLES = {Bundle: {"env": True}}` | The application picks its bundles, per environment |
+| Bundle config | A typed config class buildable with no arguments; `__post_init__` validates | Configuration is Python, not files |
+| Application config | `@configure` functions | Provide or transform a bundle's config |
+| Environment gate | `@when("prod")` / `@when_not("prod")` | Skip a scanned object outside its environment |
+| Parameters | `@parameters` / `env("X", int, default=...)` | Named values injected by key |
+| Config forwarding | `Annotated[C \| None, AliasOf("target")]` | Send a config field to another bundle |
+| Scanning | The kernel scan + `services.load(...)` | Discover services under a package |
+| Nominal autoconfiguration | `builder.register_for_autoconfiguration(T)` | Tag every subclass of `T` |
+| Marker autoconfiguration | `builder.register_attribute_for_autoconfiguration(reader, callback)` | Tag services by a marker a bundle defines |
+| Class-level autoconfigure | `@autoconfigure(...)` / `@autoconfigure_tag(...)` | The application's equivalent, on a class |
+| Registering services | `services.set` / `services.instance` / `services.alias` / `services.load` | The bundle's service-registration surface |
+| Aliasing | `@as_alias(alias, *, qualifier=)` | One type reachable under another |
+| Tagged ordering | `@as_tagged_item(index=, priority=, before=, after=)` | Deterministic collection order |
+| Compiler pass stages | `PassStage.BEFORE_OPTIMIZATION / OPTIMIZE / BEFORE_REMOVING / REMOVE / AFTER_REMOVING` | Five stages, priority-ordered within each |
+| Compiler passes | `Bundle.process(builder)` + `@compiler_pass(stage=, priority=)` | See and adjust every definition |
+| Conditional removal | `@remove_if_missing(service= / class_= / package=)` | Drop a service when a peer is absent |
+| Decoration | `@as_decorator(T, priority=, on_invalid=OnInvalid.*)` + `Annotated[T, AutowireDecorated()]` | Wrap a service and receive the original |
+| Parameter and target injection | `Autowire(param=...)` / `Target(name)` | Inject a parameter, or select a qualified service |
+| Tag collections | `Sequence[T]` / `Mapping[Hashable, T]` / `ServiceLocator` | Inject every tagged service, eagerly or lazily |
+| Reset between messages | `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")` | Rebind stateful services per message |
+| Lifecycle | `async Bundle.boot()` / `async Bundle.shutdown()` reading `self.container`; `@on_boot` / `@on_shutdown` | Async startup and cleanup |
+| Container access | `xtr_service_contracts.ContainerInterface` — kernel-provided | Get / has by type plus qualifier, plus named parameters |
+| Lazy service map | `xtr_dependency_injection.ServiceLocator` | A `Mapping[Hashable, T]` that builds entries on demand |
+| Diagnostics | `CompiledKernel.report`, `debug:*` commands | Inspect bundles, configs, definitions, scan |
 
-**Deliberate deviations from Symfony 8.2**, all documented above:
+### How our API behaves
 
-- **Keys are `(type, qualifier)`** rather than string ids: every id is a class, every alias
-  becomes a qualifier. `#[Target]` maps 1:1.
-- **`class_`** (trailing underscore) in `@remove_if_missing`, because `class` is a Python
-  keyword.
-- **`package=`** in `@remove_if_missing` is evaluated by the pass independently of `class_=`
-  (each attribute is one condition); the decorator surface currently requires `class_=`
-  alongside `package=`, but the pass fires on the package check on its own.
-- **Explicit `@as_service`** instead of Symfony's resource-wide "register every class"; there
-  is no unused-service pruning.
-- **Async `boot` / `shutdown`.**
-- **No lazy proxies, no synthetic services, no abstract/parent definitions, no public/private
-  pruning.**
-- **No entry-point bundle discovery**: installing a package does not activate a bundle; the
-  application lists root bundles.
+- **Services are keyed by type plus an optional qualifier.** Every id is a class; two
+  registrations of the same class are told apart by a string qualifier, and `Target(name)`
+  picks one at an injection site.
+- **`class_` in `@remove_if_missing` carries a trailing underscore** because `class` is a
+  Python keyword.
+- **`service=` / `class_=` / `package=`** in `@remove_if_missing` are each an independent
+  condition, and any non-empty combination may be given in one call; every condition must
+  hold for the service to survive.
+- **`Autowire` selects by type**, not by a service id: an autowired dependency is chosen by
+  its type plus an optional `Target` qualifier.
+- **`@as_alias` is unconditional and every service is reachable**: gate a definition with
+  `@when` / `@when_not` on the class instead of asking the alias to condition itself.
+- **`env(name, bool)`** reads `1/true/yes/on` and `0/false/no/off` case-insensitively, so
+  `env("DEBUG", bool)` on `"0"` is `False`, not truthy.
+- **`container.get()` returns singletons directly**; a `lifetime="scoped"` / `"transient"`
+  service must be resolved inside a scope. An unknown dependency is reported as a guided
+  build error naming the service and the missing type, not an engine stack trace.
+- **`@as_service` is explicit**: registration is opt-in per class, and there is no
+  unused-service pruning.
+- **`boot` and `shutdown` are async.**
+- **No lazy proxies, no synthetic services, no abstract or parent definitions, no
+  public/private pruning.**
+- **Installing a package does not activate a bundle**: there is no entry-point discovery, so
+  the application lists root bundles.
 
 ## Errors
 

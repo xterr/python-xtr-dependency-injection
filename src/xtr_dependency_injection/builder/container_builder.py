@@ -5,8 +5,6 @@ the whole container — what exists, which config each bundle resolved — and
 may still add, remove or mutate definitions. Earlier phases (``build``,
 ``prepend_extension``, ``load_extension``) also receive one, but with
 narrower operations.
-
-Named after Symfony's ``ContainerBuilder``.
 """
 
 from __future__ import annotations
@@ -56,8 +54,8 @@ class ContainerBuilder:
     :meth:`register_for_autoconfiguration` and :meth:`register_attribute_for_autoconfiguration`
     are allowed. In phase ``prepend``, additionally
     :meth:`prepend_extension_config`. In phase ``load`` and ``process``,
-    definition/alias/tag mutations too. Named after Symfony's
-    ``ContainerBuilder`` — see the module docstring.
+    definition/alias/tag mutations too. See the module docstring for the
+    full phase → allowed-operations table.
     """
 
     __slots__: tuple[str, ...] = ("_origin", "_state")
@@ -71,10 +69,7 @@ class ContainerBuilder:
         self._origin = origin
 
     def has(self, service: type, /, qualifier: Hashable | None = None) -> bool:
-        """Return whether a definition or alias exists for ``(service, qualifier)``.
-
-        Named after Symfony's ``ContainerBuilder::has``.
-        """
+        """Return whether a definition or alias exists for ``(service, qualifier)``."""
         key = (service, qualifier)
         return self._state.store.get(key) is not None or key in self._state.aliases
 
@@ -88,8 +83,7 @@ class ContainerBuilder:
     ) -> Definition:
         """Register ``service`` as a class definition and return it, for further mutation.
 
-        Named after Symfony's ``ContainerBuilder::register``. Allowed in
-        phases ``load`` and ``process``.
+        Allowed in phases ``load`` and ``process``.
         """
         self._allow("register", "load", "autoconfigure", "process")
         key: ServiceKey = (service, qualifier)
@@ -100,9 +94,8 @@ class ContainerBuilder:
     def set_definition(self, definition: Definition, /) -> Definition:
         """Overwrite the definition of ``definition.key`` with ``definition``.
 
-        Named after Symfony's ``ContainerBuilder::setDefinition``. Allowed
-        in phases ``load`` and ``process``. Records the previous origin as
-        an override.
+        Allowed in phases ``load`` and ``process``. Records the previous
+        origin as an override.
         """
         self._allow("set_definition", "load", "autoconfigure", "process")
         existing = self._state.store.get(definition.key)
@@ -115,8 +108,6 @@ class ContainerBuilder:
     def get_definition(self, service: type, /, qualifier: Hashable | None = None) -> Definition:
         """Return the definition of ``(service, qualifier)``.
 
-        Named after Symfony's ``ContainerBuilder::getDefinition``.
-
         Raises:
             UnknownServiceError: If no such definition exists.
         """
@@ -125,15 +116,12 @@ class ContainerBuilder:
     def has_definition(self, service: type, /, qualifier: Hashable | None = None) -> bool:
         """Return whether the definition of ``(service, qualifier)`` exists.
 
-        Named after Symfony's ``ContainerBuilder::hasDefinition`` — unlike
-        :meth:`has`, this does not follow aliases.
+        Unlike :meth:`has`, this does not follow aliases.
         """
         return self._state.store.get((service, qualifier)) is not None
 
     def find_definition(self, service: type, /, qualifier: Hashable | None = None) -> Definition:
         """Return the definition ``(service, qualifier)`` resolves to, following aliases.
-
-        Named after Symfony's ``ContainerBuilder::findDefinition``.
 
         Raises:
             UnknownServiceError: If neither a definition nor an alias
@@ -149,8 +137,6 @@ class ContainerBuilder:
     def remove_definition(self, service: type, /, qualifier: Hashable | None = None) -> None:
         """Remove the definition of ``(service, qualifier)``.
 
-        Named after Symfony's ``ContainerBuilder::removeDefinition``.
-
         Raises:
             UnknownServiceError: If no such definition exists.
         """
@@ -159,10 +145,7 @@ class ContainerBuilder:
         self._state.store.remove(definition.key)
 
     def get_definitions(self) -> tuple[Definition, ...]:
-        """Return every definition, in declaration order.
-
-        Named after Symfony's ``ContainerBuilder::getDefinitions``.
-        """
+        """Return every definition, in declaration order."""
         return self._state.store.entries()
 
     def set_alias(
@@ -176,8 +159,7 @@ class ContainerBuilder:
     ) -> None:
         """Register an alias from ``(alias, alias_qualifier)`` to ``(target, target_qualifier)``.
 
-        Named after Symfony's ``ContainerBuilder::setAlias``. Allowed in
-        phases ``load`` and ``process``.
+        Allowed in phases ``load`` and ``process``.
         """
         self._allow("set_alias", "load", "autoconfigure", "process")
         record_alias(
@@ -191,8 +173,6 @@ class ContainerBuilder:
     def get_alias(self, alias: type, /, qualifier: Hashable | None = None) -> ServiceKey:
         """Return the target key for ``(alias, qualifier)``.
 
-        Named after Symfony's ``ContainerBuilder::getAlias``.
-
         Raises:
             UnknownServiceError: If no such alias exists.
         """
@@ -203,16 +183,11 @@ class ContainerBuilder:
         return target
 
     def has_alias(self, alias: type, /, qualifier: Hashable | None = None) -> bool:
-        """Return whether ``(alias, qualifier)`` is aliased to another key.
-
-        Named after Symfony's ``ContainerBuilder::hasAlias``.
-        """
+        """Return whether ``(alias, qualifier)`` is aliased to another key."""
         return (alias, qualifier) in self._state.aliases
 
     def remove_alias(self, alias: type, /, qualifier: Hashable | None = None) -> None:
         """Remove the alias ``(alias, qualifier)``.
-
-        Named after Symfony's ``ContainerBuilder::removeAlias``.
 
         Raises:
             UnknownServiceError: If no such alias exists.
@@ -227,7 +202,6 @@ class ContainerBuilder:
     def find_tagged_service_ids(self, tag: str, /) -> dict[ServiceKey, list[dict[str, object]]]:
         """Return every definition tagged ``tag``, mapped to its attribute list.
 
-        Named after Symfony's ``ContainerBuilder::findTaggedServiceIds``.
         Definition order.
         """
         return {
@@ -246,10 +220,9 @@ class ContainerBuilder:
     ) -> None:
         """Register a compiler pass to run in ``stage`` at ``priority``.
 
-        Named after Symfony's ``ContainerBuilder::addCompilerPass``. Only
-        allowed in phase ``build`` (from :meth:`Bundle.build`). Passes
-        registered here run after the bundle's own ``process`` (Symfony
-        8.1 bundle-as-CompilerPass) and before the application's scanned
+        Only allowed in phase ``build`` (from :meth:`Bundle.build`). Passes
+        registered here run after the bundle's own ``process`` (bundle-as-
+        compiler-pass) and before the application's scanned
         ``@compiler_pass`` functions.
         """
         self._allow("add_compiler_pass", "build")
@@ -267,12 +240,11 @@ class ContainerBuilder:
     def register_for_autoconfiguration(self, type_: type, /) -> AutoconfigureRule:
         """Return an :class:`AutoconfigureRule` for every subclass of ``type_``.
 
-        Named after Symfony's ``ContainerBuilder::registerForAutoconfiguration``.
         Allowed in phases ``build`` and ``load``. The kernel's autoconfigure
         step applies each rule to every non-kernel definition whose built
-        type has ``type_`` in its ``__mro__`` (nominal, matching Symfony's
-        ``instanceof``). A tag already carried on a definition wins over the
-        rule's — explicit stays.
+        type has ``type_`` in its ``__mro__`` (a nominal subclass check). A
+        tag already carried on a definition wins over the rule's — explicit
+        stays.
         """
         self._allow("register_for_autoconfiguration", "build", "load")
         rule = AutoconfigureRule(type_=type_)
@@ -282,7 +254,6 @@ class ContainerBuilder:
     def register_attribute_for_autoconfiguration(self, reader: Reader, callback: Apply, /) -> None:
         """Register a callback the kernel calls for every metadata item ``reader`` finds.
 
-        Named after Symfony's ``ContainerBuilder::registerAttributeForAutoconfiguration``.
         The callback runs in the autoconfigure step with the registering
         bundle's :class:`ServiceConfigurator`.
         """
@@ -299,9 +270,8 @@ class ContainerBuilder:
     def set_parameter(self, name: str, value: object, /) -> None:
         """Set the parameter ``name`` to ``value``.
 
-        Named after Symfony's ``ContainerBuilder::setParameter``. Merges
-        into the parameter sources under this builder's origin; a leaf set
-        twice by non-``app`` sources with a different value raises
+        Merges into the parameter sources under this builder's origin; a
+        leaf set twice by non-``app`` sources with a different value raises
         :class:`ParameterConflictError` at parameter-merge time.
         """
         self._allow("set_parameter", "build", "prepend", "load", "autoconfigure", "process")
@@ -317,8 +287,6 @@ class ContainerBuilder:
     def get_extension_config(self, bundle: type[C], /) -> C: ...
     def get_extension_config(self, bundle: str | type[C], /) -> object:
         """Return the resolved config of a bundle, by name or by config type.
-
-        Named after Symfony's ``ContainerBuilder::getExtensionConfig``.
 
         Raises:
             MissingBundleError: If no active bundle has that name.
@@ -340,7 +308,6 @@ class ContainerBuilder:
     ) -> None:
         """Adjust another bundle's config, before it is loaded.
 
-        Named after Symfony's ``ContainerBuilder::prependExtensionConfig``.
         Only allowed in phase ``prepend`` (from :meth:`Bundle.prepend_extension`).
 
         Raises:
@@ -371,8 +338,7 @@ class ContainerBuilder:
     def get_parameter(self, name: str, /) -> object:
         """Return the build-time parameter ``name`` (dotted path).
 
-        Allowed from phase ``build`` onward. Named after Symfony's
-        ``ContainerBuilder::getParameter``.
+        Allowed from phase ``build`` onward.
 
         Raises:
             ParameterNotFoundError: If the parameter is not set.
@@ -386,8 +352,7 @@ class ContainerBuilder:
     def has_parameter(self, name: str, /) -> bool:
         """Return whether the parameter ``name`` is defined.
 
-        Allowed from phase ``build`` onward. Named after Symfony's
-        ``ContainerBuilder::hasParameter``.
+        Allowed from phase ``build`` onward.
         """
         self._allow("has_parameter", "build", "prepend", "load", "autoconfigure", "process")
         found, _ = _lookup_parameter(self._state.parameters, name)

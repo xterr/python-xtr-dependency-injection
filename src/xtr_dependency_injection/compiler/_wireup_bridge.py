@@ -138,7 +138,7 @@ def built_type(definition: Definition) -> type | None:
     - ``class``: the provider itself.
     - ``instance``: ``type(provider)``.
     - ``factory``: ``key_type(provider, None)``, or ``None`` when the factory
-      has no return annotation (Symfony ``AutoconfigureTag`` skips those).
+      has no return annotation (autoconfigure tag rules skip those).
 
     A parameterized generic (``ServiceLocator[T]``) is unwrapped to its origin
     class so ``__mro__`` walks succeed.

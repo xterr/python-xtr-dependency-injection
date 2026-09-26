@@ -85,7 +85,7 @@ class CompiledKernel:
         booted: list[AnyBundle] = []
         try:
             for bundle in self._bundles:
-                # Symfony's setContainer: bundles see the container before their boot runs.
+                # Give each bundle the container before its boot runs, so boot code can use it.
                 bundle.container = self.container
                 await bundle.boot()
                 booted.append(bundle)

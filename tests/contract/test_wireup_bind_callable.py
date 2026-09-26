@@ -9,6 +9,7 @@ import pytest
 import wireup
 from wireup import Injected
 
+from xtr_dependency_injection import Injected as XtrInjected
 from xtr_dependency_injection.runtime import bind_callable
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
@@ -56,6 +57,10 @@ def add(left: int, right: int) -> int:
     return left + right
 
 
+async def greet_forward_ref(name: str, greeting: XtrInjected["Greeting"]) -> str:  # noqa: UP037
+    return f"{greeting.text} {name}"
+
+
 def _container(*extra: object) -> WireupContainer:
     engine = wireup.create_async_container(
         injectables=[
@@ -98,6 +103,12 @@ async def test_a_sync_function_result_is_returned_as_is() -> None:
     bound = bind_callable(_container(), add)
 
     assert await bound(2, 3) == 5
+
+
+async def test_a_string_nested_in_injected_is_resolved_at_bind_time() -> None:
+    bound = bind_callable(_container(), greet_forward_ref)
+
+    assert await bound("ada") == "hello ada"
 
 
 def test_the_wrapper_is_named_like_the_target() -> None:

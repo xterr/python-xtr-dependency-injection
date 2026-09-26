@@ -18,7 +18,7 @@ import types
 from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
 from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
-from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+from xtr_dependency_injection.exception._signatures import evaluated_signature
 
 from ._wireup_bridge import REGISTRATION_ATTRIBUTE, to_engine_signature
 
@@ -75,19 +75,14 @@ def _evaluated_signature(target: Callable[..., object] | type) -> inspect.Signat
 
     A wrapper presenting this signature lives in another module than
     ``target``, so a string annotation could no longer be resolved against the
-    right globals: evaluate them now, against ``target``'s own.
+    right globals: evaluate them now, against ``target``'s own — including a
+    string nested inside ``Annotated[...]`` (see :func:`evaluated_signature`).
 
     Raises:
         NameError: If an annotation names something not importable at
             runtime; the note names ``target``.
     """
-    try:
-        return inspect.signature(target, eval_str=True)
-    except NameError as error:
-        error.add_note(
-            f"while reading the signature of {qualified_name(target)}: {ANNOTATION_HINT}"
-        )
-        raise
+    return evaluated_signature(target)
 
 
 def _synthesize_class_factory(cls: type) -> Callable[..., object]:
@@ -119,10 +114,10 @@ def _alias_factory(
 ) -> Callable[..., object]:
     """Return a factory forwarding ``(target_type, target_qualifier)`` under ``alias_type``.
 
-    Symfony's ``setAlias`` (14f in the plan): the alias shares the target's
-    instance. The synthesized factory takes the target as an injected
-    parameter and hands it back, so wireup resolves the alias through the
-    target definition without duplicating state.
+    The alias shares the target's instance. The synthesized factory takes
+    the target as an injected parameter and hands it back, so wireup
+    resolves the alias through the target definition without duplicating
+    state.
     """
     import wireup  # noqa: PLC0415 — only compiler code may reach wireup.
 

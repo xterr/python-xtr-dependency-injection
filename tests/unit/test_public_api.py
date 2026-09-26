@@ -50,6 +50,8 @@ PUBLIC = {
     "OnInvalid",
     "Target",
     "bind_callable",
+    "bundle_active",
+    "qualified_name",
     "ServiceLocator",
     "ServicesResetter",
     "RequiredBundle",

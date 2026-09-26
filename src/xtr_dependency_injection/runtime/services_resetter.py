@@ -1,4 +1,4 @@
-"""Resetting stateful services between units of work — Symfony's ``kernel.reset``.
+"""Resetting stateful services between units of work — the ``kernel.reset`` tag.
 
 A long-running worker handles one message after another with the same
 singletons. A service that buffers or caches per unit of work declares a
@@ -35,6 +35,14 @@ class ServicesResetter:
         again and again, and must not be kept alive by being resettable. When
         a weakly held instance is collected the entry is dropped immediately,
         so a long-running worker never accumulates dead references.
+
+        An instance that cannot be weak-referenced — one whose ``__slots__``
+        omit ``__weakref__`` — is instead held strongly, by a closure over it,
+        so it lives as long as the resetter does. Both cases key the entry by
+        ``id(instance)`` to skip a repeat of the same instance; that
+        deduplication is exact because a strongly held instance's ``id`` cannot
+        be reused while it is tracked, and a weakly held one's entry is gone
+        (dropped by the collection callback) before its ``id`` could be.
         """
         key = id(instance)
         if key in self._tracked:

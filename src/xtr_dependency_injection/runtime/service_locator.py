@@ -1,11 +1,10 @@
-r"""A lazy, keyed view of services — Symfony's tagged locator.
+"""A lazy, keyed view of services.
 
 A bus configured to use two of ten registered middleware should build two.
 A locator maps names to service keys and builds a service only when it is
-asked for by name, mirroring Symfony 8.2's
-``Symfony\Component\DependencyInjection\ServiceLocator`` (a
-``ServiceCollectionInterface``: ``Countable`` + ``IteratorAggregate`` +
-``ServiceProviderInterface``).
+asked for by name. It implements :class:`ServiceCollectionInterface` from
+:mod:`xtr_service_contracts`: it is sized, async-iterable, and answers
+``has`` / ``get`` / ``provided_services``.
 """
 
 from __future__ import annotations

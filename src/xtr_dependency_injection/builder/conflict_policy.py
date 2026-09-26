@@ -4,7 +4,7 @@ Checked before wireup ever sees the definitions, so an error names both
 origins instead of a bare duplicate:
 
 - the application over a bundle: the application wins, silently, and the
-  report records the override (Symfony's parity);
+  report records the override;
 - bundle against bundle: an error, unless it goes through
   ``builder.replace``;
 - application against application: an error;

@@ -52,13 +52,11 @@ class KernelBundle(Bundle):
 
     @override
     def build(self, builder: ContainerBuilder) -> None:
-        """Register the Symfony 8.2 ``kernel.reset`` autoconfiguration.
+        """Register the ``kernel.reset`` autoconfiguration rule.
 
         Every non-kernel service implementing ``ResetInterface`` (nominal
         subclass, not structural) gets ``kernel.reset`` with ``method="reset"``;
         a service opts in explicitly with ``add_tag("kernel.reset", method=…)``.
-        Mirrors ``ServicesBundle::loadExtension`` at
-        ``.tmp/symfony/src/Symfony/Component/DependencyInjection/Kernel/ServicesBundle.php:89``.
         """
         _ = builder.register_for_autoconfiguration(ResetInterface).add_tag(
             "kernel.reset", method="reset"

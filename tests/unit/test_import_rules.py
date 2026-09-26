@@ -30,6 +30,33 @@ ALLOWED: dict[str, set[str]] = {
 }
 ABOVE_EVERYTHING = {"integration", "kernel", "testing"}
 
+# The built-in compiler passes live under compiler/ (relocated from
+# kernel/passes/). Only these modules may reach into builder/ and decorator/;
+# each set is the module's complete import contract beyond compiler/ itself,
+# and none may import wireup. Every other compiler module keeps ALLOWED above.
+COMPILER_PASS_MODULES: dict[str, set[str]] = {
+    f"{PACKAGE}.compiler.decorator_service_pass": {
+        "builder.definition",
+        "decorator.as_decorator",
+        "exception",
+    },
+    f"{PACKAGE}.compiler.remove_missing_dependencies_pass": {
+        "decorator.remove_if_missing",
+    },
+    f"{PACKAGE}.compiler.check_alias_validity_pass": {
+        "builder.definition",
+        "exception",
+    },
+    f"{PACKAGE}.compiler.register_autoconfigure_attributes_pass": {
+        "builder.autoconfigure_rule",
+        "decorator.autoconfigure",
+        "exception",
+    },
+    f"{PACKAGE}.compiler.resolve_instanceof_conditionals_pass": {
+        "exception",
+    },
+}
+
 
 def _modules() -> list[tuple[str, Path]]:
     found: list[tuple[str, Path]] = []
@@ -119,6 +146,15 @@ def test_each_layer_imports_only_what_is_below_it(module: str, path: Path) -> No
         for target in _imports(module, path, runtime_only=True)
         if (name := _internal(target)) is not None
     }
+    if module in COMPILER_PASS_MODULES:
+        allowed = {"compiler", *COMPILER_PASS_MODULES[module]}
+        forbidden = {
+            name
+            for name in internal
+            if not any(name == entry or name.startswith(f"{entry}.") for entry in allowed)
+        }
+        assert forbidden == set()
+        return
     if layer in ALLOWED:
         allowed = {layer, *ALLOWED[layer]}
         forbidden = {
@@ -132,6 +168,18 @@ def test_each_layer_imports_only_what_is_below_it(module: str, path: Path) -> No
         assert upward == set()
 
 
+@pytest.mark.parametrize("module", sorted(COMPILER_PASS_MODULES))
+def test_the_relocated_compiler_passes_never_import_wireup(module: str) -> None:
+    path = next(p for m, p in MODULES if m == module)
+    wireup = {
+        target
+        for target in _imports(module, path, runtime_only=False)
+        if target == "wireup" or target.startswith("wireup.")
+    }
+    assert wireup == set()
+
+
 def test_the_rules_see_every_module() -> None:
     assert BRIDGE in {module for module, _ in MODULES}
+    assert set(COMPILER_PASS_MODULES) <= {module for module, _ in MODULES}
     assert len(MODULES) > 50

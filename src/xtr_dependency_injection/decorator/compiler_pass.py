@@ -42,7 +42,7 @@ def compiler_pass(
 ) -> F | Callable[[F], F]:
     """Run the decorated ``def (builder: ContainerBuilder) -> None`` in ``stage``.
 
-    Passes run stage by stage in Symfony's order (see
+    Passes run stage by stage in the order declared by (see
     :class:`~xtr_dependency_injection.builder.pass_stage.PassStage`); within
     one stage, by ``priority`` descending, ties by scan order.
     """

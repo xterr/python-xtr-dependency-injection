@@ -1,9 +1,9 @@
 """Emitting the final definitions as wireup injectables, and building the container.
 
 The order of what is emitted is the order of wireup's ``Sequence[T]`` and
-``Mapping`` collections — Symfony's tagged-iterator priority: the kernel
-bundle, then bundles in dependency order, then the application; within each,
-by priority, highest first, then in declaration order.
+``Mapping`` collections — a tagged-iterator priority: the kernel bundle,
+then bundles in dependency order, then the application; within each, by
+priority, highest first, then in declaration order.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def emission_order(definitions: Sequence[Definition]) -> list[Definition]:
     """Return ``definitions`` in emission order.
 
     Order = wireup ``Sequence[T]``/``Mapping[Hashable, T]`` order. The seed is
-    definition order; the ported Symfony 8.2 ``BeforeAfterSorter`` reorders it
+    definition order; :func:`sort_with_priorities` reorders it
     by each definition's ``priority`` (highest first, ``None`` bounded by its
     ``before``/``after``) and by ``before``/``after`` constraints. Items are
     identified by their built type's ``module:qualname``.
@@ -139,7 +139,8 @@ def compile_container(
     Raises:
         ContainerCompilationError: The engine refused to compile the
             container; ``__cause__`` is the wireup error, with a note naming
-            the origin of every definition whose type the message mentions.
+            the origin of every definition whose type the message mentions. An
+            unknown-dependency failure is reworded to name the fix.
     """
     try:
         return wireup.create_async_container(
@@ -149,7 +150,7 @@ def compile_container(
         )
     except WireupError as error:
         _note_origins(error, definitions)
-        wrapped = ContainerCompilationError(str(error))
+        wrapped = ContainerCompilationError(_compilation_reason(error))
         for note in getattr(error, "__notes__", ()):
             wrapped.add_note(note)
         raise wrapped from error
@@ -204,7 +205,7 @@ def _emit(
 def _reset_hook(definition: Definition) -> str | None:
     """Return the ``method`` attribute of the first ``kernel.reset`` tag, else ``None``.
 
-    Symfony 8.2's ``kernel.reset`` tag carries the method name the
+    The ``kernel.reset`` tag carries the method name the
     ``ServicesResetter`` calls on a service; it defaults to ``"reset"``.
     """
     tags = definition.get_tag("kernel.reset")
@@ -259,3 +260,40 @@ def _note_origins(error: WireupError, definitions: Sequence[Definition]) -> None
         name = getattr(definition.key[0], "__name__", None)
         if isinstance(name, str) and re.search(rf"\b{re.escape(name)}\b", message):
             error.add_note(f"{key_name(definition.key)} is defined by {definition.origin}")
+
+
+_UNKNOWN_DEPENDENCY_PATTERN = (
+    r"^Parameter '(?P<param>.+?)' of (?P<owner>.+?) has an unknown dependency on "
+    r"(?P<dependency>.+?)(?: with qualifier '(?P<qualifier>.+?)')?\.$"
+)
+_UNKNOWN_DEPENDENCY = re.compile(_UNKNOWN_DEPENDENCY_PATTERN)
+"""wireup's unknown-dependency message (a bare ``WireupError`` with no typed data)."""
+
+_ENGINE_CLASS = re.compile(r"<class '(?P<path>[^']+)'>")
+
+
+def _compilation_reason(error: WireupError) -> str:
+    """Return our own message for an unknown-dependency failure, else the engine's.
+
+    wireup raises a bare ``WireupError`` whose only data is a formatted string,
+    so the shape is matched with a regex; anything that does not match keeps the
+    engine's message verbatim. The engine error stays reachable as ``__cause__``.
+    """
+    match = _UNKNOWN_DEPENDENCY.match(str(error))
+    if match is None:
+        return str(error)
+    owner = _engine_readable(match.group("owner"))
+    dependency = _engine_readable(match.group("dependency"))
+    qualifier = match.group("qualifier")
+    needed = f"{dependency}[{qualifier!r}]" if qualifier is not None else dependency
+    return (
+        f"{owner}.{match.group('param')} needs {needed}, which is not a registered "
+        f"service: mark it @as_service (or alias it with @as_alias), or register it "
+        f"in a bundle's load_extension"
+    )
+
+
+def _engine_readable(token: str) -> str:
+    """Turn a ``repr(cls)`` such as ``<class 'a.B'>`` into its dotted path."""
+    match = _ENGINE_CLASS.fullmatch(token)
+    return match.group("path") if match else token

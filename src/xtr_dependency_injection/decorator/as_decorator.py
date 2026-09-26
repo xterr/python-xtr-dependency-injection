@@ -3,8 +3,7 @@
 The decorator is registered under the decorated service's key, so everything
 asking for that service - and every ``Sequence[T]`` holding it - gets the
 decorator. The decorator receives the original through its one parameter
-annotated ``Annotated[T, AutowireDecorated()]``, mirroring Symfony's
-``#[AutowireDecorated]``::
+annotated ``Annotated[T, AutowireDecorated()]``::
 
     @as_decorator(MessageBusInterface)
     class TracingBus:
@@ -15,8 +14,7 @@ annotated ``Annotated[T, AutowireDecorated()]``, mirroring Symfony's
         ) -> None: ...
 
 When the decorated service is missing, the ``on_invalid`` option decides:
-``OnInvalid.EXCEPTION`` (the default, Symfony's
-``ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE``) fails the build;
+``OnInvalid.EXCEPTION`` (the default) fails the build;
 ``OnInvalid.IGNORE`` drops the decorator; ``OnInvalid.NULL`` keeps the
 decorator under the missing target's key with ``None`` for its
 ``AutowireDecorated`` parameter (which must then allow ``None``).
@@ -24,7 +22,6 @@ decorator under the missing target's key with ``None`` for its
 
 from __future__ import annotations
 
-import inspect
 import types
 from collections.abc import Hashable
 from dataclasses import dataclass
@@ -32,7 +29,8 @@ from typing import TYPE_CHECKING, Annotated, Final, TypeVar, cast, get_args, get
 
 from xtr_dependency_injection.builder.on_invalid import OnInvalid
 from xtr_dependency_injection.exception import DecoratorSignatureError
-from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+from xtr_dependency_injection.exception._naming import qualified_name
+from xtr_dependency_injection.exception._signatures import evaluated_signature
 
 from ._marker import own_marker, set_marker
 
@@ -60,9 +58,8 @@ _DECORATOR: Final = "__xtr_decorator__"
 class AutowireDecorated:
     """Marks the parameter of a decorator that receives the decorated service.
 
-    Symfony's ``#[AutowireDecorated]``: applied through
-    ``Annotated[T, AutowireDecorated()]`` to the parameter that receives the
-    service the decorator wraps.
+    Applied through ``Annotated[T, AutowireDecorated()]`` to the parameter
+    that receives the service the decorator wraps.
     """
 
 
@@ -98,8 +95,7 @@ def as_decorator(
     The decorator inherits the decorated service's lifetime and lives only
     under the target's key.
 
-    Named after Symfony's ``#[AsDecorator]`` attribute; ``on_invalid`` maps to
-    Symfony's ``AsDecorator::$onInvalid``.
+    ``on_invalid`` chooses what happens when the target is not defined.
     """
 
     def record(target_obj: D) -> D:
@@ -143,11 +139,9 @@ def decorated_parameter_of(decorator: object, target: object) -> DecoratedParame
             parameter annotated for another type than ``target``.
     """
     name = qualified_name(decorator)
-    try:
-        signature = inspect.signature(cast("Callable[..., object]", decorator), eval_str=True)
-    except NameError as error:
-        error.add_note(f"while reading decorator {name}: {ANNOTATION_HINT}")
-        raise
+    signature = evaluated_signature(
+        cast("Callable[..., object]", decorator), context=f"reading decorator {name}"
+    )
     found: list[tuple[str, object, bool]] = []
     for parameter in signature.parameters.values():
         typed = _autowire_decorated_type(cast("object", parameter.annotation))

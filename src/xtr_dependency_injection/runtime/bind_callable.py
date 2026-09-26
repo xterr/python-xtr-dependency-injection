@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, cast
 import wireup
 
 from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
-from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+from xtr_dependency_injection.exception._naming import qualified_name
+from xtr_dependency_injection.exception._signatures import evaluated_signature
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 if TYPE_CHECKING:
@@ -114,7 +115,8 @@ def bind_callable(
 def _signature_of(target: Callable[..., object] | type) -> inspect.Signature:
     """Return what calling ``target`` takes, annotations evaluated against its module.
 
-    For a class, that is its ``__call__`` without ``self``.
+    For a class, that is its ``__call__`` without ``self``. A string nested in
+    ``Annotated[...]`` is resolved too (see :func:`evaluated_signature`).
 
     Raises:
         TypeError: If ``target`` is a class without ``__call__``.
@@ -130,11 +132,7 @@ def _signature_of(target: Callable[..., object] | type) -> inspect.Signature:
             msg = f"{target.__qualname__} has no __call__ to bind"
             raise TypeError(msg)
         callable_target = cast("Callable[..., object]", declared)
-    try:
-        signature = inspect.signature(callable_target, eval_str=True)
-    except NameError as error:
-        error.add_note(f"while binding {qualified_name(target)}: {ANNOTATION_HINT}")
-        raise
+    signature = evaluated_signature(callable_target, context=f"binding {qualified_name(target)}")
     if isinstance(target, type):
         parameters = list(signature.parameters.values())[1:]
         signature = signature.replace(parameters=parameters)

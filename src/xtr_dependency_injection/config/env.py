@@ -1,8 +1,17 @@
 """Reading an environment variable while the kernel builds: ``env()``.
 
 Config functions run during ``build()``, so ``env()`` reads the environment
-of the process building the container — the Python-first counterpart of
-Symfony's ``%env(X)%``.
+of the process building the container.
+
+``env`` is overloaded so the return type follows ``cast`` and ``default``:
+``env("PORT", int)`` is ``int``, ``env("PORT", int, default=None)`` is
+``int | None``, and ``env("HOST")`` is ``str``.
+
+``bool`` is the one ``cast`` that is not applied as ``bool(value)``. That would
+be truthy for every non-empty string — ``bool("false")`` is ``True`` — which is
+never what an environment flag means. So ``bool`` is special-cased: the value is
+read as ``1/true/yes/on`` for true and ``0/false/no/off`` or empty for false,
+case-insensitively, and anything else raises ``InvalidEnvironmentVariableError``.
 """
 
 from __future__ import annotations

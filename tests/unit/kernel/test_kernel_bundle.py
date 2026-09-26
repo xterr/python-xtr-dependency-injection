@@ -33,8 +33,7 @@ def test_the_kernel_bundle_is_named_kernel() -> None:
 def test_it_provides_the_kernel_and_the_resetter() -> None:
     state = _loaded()
 
-    # KernelInterface is registered as an alias to the concrete _KernelInfo,
-    # matching Symfony 8.2's ``setAlias`` semantics for the interface.
+    # KernelInterface is registered as an alias to the concrete _KernelInfo.
     assert (KernelInterface, None) in state.aliases
     assert state.store.get((ServicesResetter, None)) is not None
 

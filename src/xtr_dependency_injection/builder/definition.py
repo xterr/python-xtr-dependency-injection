@@ -45,7 +45,7 @@ class Origin:
 class Decorates:
     """What ``Definition.set_decorated_service`` records: a target key, priority and on-invalid.
 
-    Named after Symfony's ``Definition::setDecoratedService``.
+    Recorded by :meth:`Definition.set_decorated_service`.
 
     Attributes:
         key: The ``(type, qualifier)`` of the decorated service.
@@ -71,15 +71,13 @@ class Definition:
         lifetime: How long wireup keeps what it builds.
         origin: Who contributed it.
         priority: Its position in ordered collections; ``None`` means "no
-            explicit priority", read as zero by todo 14's emission_order
-            (Symfony's ``BeforeAfterSorter`` will consume it in todo 17).
-        tags: Tag name → list of attribute mappings (Symfony's
-            ``Definition::$tags``). ``kernel.reset`` is the Symfony 8.2 tag
-            resettable services carry, read by the compiler.
-        decorates: What service this definition decorates, when it does
-            (Symfony's ``Definition::setDecoratedService``).
+            explicit priority", read as zero by :func:`emission_order` and
+            consumed by :func:`sort_with_priorities`.
+        tags: Tag name → list of attribute mappings. ``kernel.reset`` is the
+            tag resettable services carry, read by the compiler.
+        decorates: What service this definition decorates, when it does.
         before: Types this definition must precede in tagged collections
-            (used by todo 17's ``BeforeAfterSorter``).
+            (consumed by :func:`sort_with_priorities`).
         after: Types this definition must follow in tagged collections.
     """
 
@@ -97,8 +95,7 @@ class Definition:
     def add_tag(self, name: str, /, **attributes: object) -> Definition:
         """Add a tag ``name`` with the given attribute mapping.
 
-        Named after Symfony's ``Definition::addTag``: repeatable — each call
-        appends one attribute mapping under ``name``.
+        Repeatable — each call appends one attribute mapping under ``name``.
         """
         self.tags.setdefault(name, []).append(dict(attributes))
         return self
@@ -110,8 +107,7 @@ class Definition:
     def get_tag(self, name: str, /) -> list[dict[str, object]]:
         """Return every attribute mapping added under ``name``.
 
-        Named after Symfony's ``Definition::getTag``. Returns an empty list
-        when the tag was never added.
+        Returns an empty list when the tag was never added.
         """
         return list(self.tags.get(name, ()))
 
@@ -131,8 +127,7 @@ class Definition:
     ) -> Definition:
         """Mark this definition as decorating ``(target, qualifier)``.
 
-        Named after Symfony's ``Definition::setDecoratedService``. ``on_invalid``
-        chooses what happens when the target is not defined - see
+        ``on_invalid`` chooses what happens when the target is not defined - see
         :class:`~xtr_dependency_injection.decorator.as_decorator.OnInvalid`.
         """
         self.decorates = Decorates(

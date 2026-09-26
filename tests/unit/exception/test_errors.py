@@ -235,9 +235,16 @@ def test_container_compilation_error_carries_the_engine_message() -> None:
     assert isinstance(error, DependencyInjectionError)
 
 
-def test_service_resolution_error_carries_the_key() -> None:
-    error = ServiceResolutionError((Sample, "q"))
+def test_service_resolution_error_carries_the_key_and_engine_reason() -> None:
+    error = ServiceResolutionError((Sample, "q"), "the engine blew up")
 
     assert error.key == (Sample, "q")
-    assert str(error) == f"failed to resolve {__name__}.Sample['q'] from the container"
+    assert error.reason == "the engine blew up"
+    assert str(error) == f"failed to resolve {__name__}.Sample['q']: the engine blew up"
     assert isinstance(error, DependencyInjectionError)
+
+
+def test_service_resolution_error_appends_advice_when_given() -> None:
+    error = ServiceResolutionError((Sample, None), "Scope mismatch", advice="enter a scope")
+
+    assert str(error) == f"failed to resolve {__name__}.Sample: Scope mismatch\nenter a scope"

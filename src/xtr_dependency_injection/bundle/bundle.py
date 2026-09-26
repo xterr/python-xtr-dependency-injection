@@ -5,13 +5,12 @@ without a container, and its bundle only decides what goes into one. Every
 hook is optional; a bundle contributing nothing but scanned resources is an
 empty class.
 
-Hook names and semantics follow Symfony 8.2's
-``Symfony\Component\DependencyInjection\Kernel\AbstractBundle``:
-``build`` for compilation-time wiring, ``prepend_extension`` for adjusting
-other bundles' configs, ``load_extension`` for defining services,
-``process`` for a whole-container view once every bundle loaded, and
-``boot`` / ``shutdown`` around the container's life — the last two taking
-their container from ``self.container``, set by the kernel before ``boot``.
+The hooks are: ``build`` for compilation-time wiring,
+``prepend_extension`` for adjusting other bundles' configs,
+``load_extension`` for defining services, ``process`` for a
+whole-container view once every bundle loaded, and ``boot`` / ``shutdown``
+around the container's life — the last two taking their container from
+``self.container``, set by the kernel before ``boot``.
 """
 
 from __future__ import annotations
@@ -62,8 +61,8 @@ class Bundle(Generic[ConfigT]):
 
     Attributes:
         container: The container the bundle has been booted against, set by
-            the kernel right before :meth:`boot` runs (Symfony's
-            ``setContainer``). It is ``None`` outside a boot/shutdown cycle.
+            the kernel right before :meth:`boot` runs. It is ``None``
+            outside a boot/shutdown cycle.
     """
 
     container: ContainerInterface | None = None

@@ -94,12 +94,12 @@ class BuildState:
         autoconfigurators: What ``builder.register_attribute_for_autoconfiguration``
             registered.
         autoconfigure_rules: What ``builder.register_for_autoconfiguration``
-            registered — Symfony's nominal ``instanceof`` rules, applied in
-            the autoconfigure step to every non-kernel definition whose built
+            registered — nominal subclass rules, applied in the
+            autoconfigure step to every non-kernel definition whose built
             type has the rule's type in its ``__mro__``.
         parameters: Parameters bundles contributed, with their origin.
         prepends: Config prepends bundles recorded, in call order.
-        aliases: Symfony-style alias table ``alias_key -> target_key``.
+        aliases: The alias table ``alias_key -> target_key``.
         alias_origins: Who contributed each alias, for the conflict policy.
         compiler_passes: Passes ``builder.add_compiler_pass`` recorded in
             phase ``build``, in call order.
@@ -127,7 +127,6 @@ class BuildState:
 class ServiceConfigurator:
     """Defines services on behalf of one bundle.
 
-    Symfony's ``ServicesConfigurator`` (see ``Loader/Configurator``):
     ``set``, ``instance``, ``alias`` and ``load`` cover every way a bundle
     contributes a service from ``load_extension``.
     """
@@ -151,9 +150,8 @@ class ServiceConfigurator:
     ) -> Definition:
         """Provide ``obj`` itself, under its own type.
 
-        Named after Symfony's ``ServicesConfigurator::instance`` — the key is
-        always ``(type(obj), qualifier)``. Register an alias to expose it
-        under an interface (:meth:`alias`).
+        The key is always ``(type(obj), qualifier)``. Register an alias to
+        expose it under an interface (:meth:`alias`).
         """
         self._allow("instance", "load", "autoconfigure", "process")
         key: ServiceKey = (type(obj), qualifier)
@@ -171,10 +169,8 @@ class ServiceConfigurator:
     ) -> Definition:
         """Register ``target`` — a class or a factory function — as a service.
 
-        Named after Symfony's ``ServicesConfigurator::set``. A class is
-        registered under its own type; a function under its evaluated
-        return type. Same key + same provider is a no-op (Symfony parity,
-        matches todo 2).
+        A class is registered under its own type; a function under its
+        evaluated return type. Same key + same provider is a no-op.
 
         Raises:
             TypeError: If ``target`` is not a class or a plain function.
@@ -207,8 +203,8 @@ class ServiceConfigurator:
     ) -> None:
         """Register an alias from ``(alias, alias_qualifier)`` to ``(target, target_qualifier)``.
 
-        Named after Symfony's ``ServicesConfigurator::alias``. The alias
-        target is validated at compile time (missing → ``UnknownServiceError``).
+        The alias target is validated at compile time (missing →
+        ``UnknownServiceError``).
         """
         self._allow("alias", "load", "autoconfigure", "process")
         record_alias(
@@ -222,8 +218,7 @@ class ServiceConfigurator:
     def load(self, *resources: str | ModuleType) -> None:
         """Scan ``resources`` too, once every bundle has loaded, as this bundle's.
 
-        Named after Symfony's ``ServicesConfigurator::load``: how a bundle
-        scans a module only when a peer is active.
+        This is how a bundle scans a module only when a peer is active.
         """
         self._allow("load", "load")
         self._state.late_scans.append((self._origin.name, resources))
