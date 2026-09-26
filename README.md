@@ -337,11 +337,17 @@ class MailConfig:
 ### Parameters
 
 **Parameters** are values injected with `Annotated[str, Autowire(param="...")]`. The kernel
-provides `kernel.name`, `kernel.environment`, `kernel.debug`, `kernel.project_dir` and
-`kernel.bundles` (a mapping of bundle name to `module:Class`); bundles add theirs with
+provides `kernel.name`, `kernel.environment`, `kernel.debug`, `kernel.project_dir`,
+`kernel.share_dir` and `kernel.bundles` (a mapping of bundle name to `module:Class`); bundles
+add theirs with
 `builder.set_parameter(name, value)`, the application with `@parameters`. They merge into
 nested mappings and never override: a leaf set twice is a `ParameterConflictError` naming
 both sources.
+
+`kernel.share_dir` is where the processes of one application share files on a machine —
+cache files, lock files: `<system temporary directory>/xtr/<digest of the project directory>`.
+Nothing is written into the project, two projects never share it, and nothing is created until
+something writes there.
 
 ```python
 from typing import Annotated
@@ -749,6 +755,31 @@ from xtr_dependency_injection import bind_callable
 
 bound = bind_callable(container, my_handler)
 result = await bound(message)
+```
+
+### Helpers for bundles
+
+Small pieces every bundle with named, configured services ends up needing:
+
+- **`Reference(service, qualifier=None)`** — a config value pointing at a service the container
+  already provides, where the bundle would otherwise build its own: a client with its own pool
+  and lifecycle, which the application keeps closing. `reference.exists_in(container)` checks
+  it at boot, `await reference.resolve(container)` fetches it, and `str(reference)` names it
+  briefly for an error message (`Redis['locks']`).
+- **`await optional_service(container, T, qualifier)`** — the service, or `None` when the
+  container does not provide it: a logger for the bundle's channel, when logging is active.
+- **`one_or_many(value)`** — a config field an application writes as one entry or several
+  (`"redis://a"` or `["array", "redis://a"]`), as a tuple: a list or a tuple is several, anything
+  else — a string included — one.
+- **`named_factory(factory, name)`** — names a factory built once per configured name, so the
+  container's report and its errors say `lock_store_reports` rather than `store` for each. It
+  renames the function itself, so give it one made for that name, such as a closure.
+
+```python
+async def store(stores: tuple[StoreEntry, ...], container: ContainerInterface) -> ...: ...
+
+
+services.set(named_factory(store, f"lock_store_{resource}"), qualifier=resource)
 ```
 
 ## Lifecycle

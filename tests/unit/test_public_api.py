@@ -67,6 +67,10 @@ PUBLIC = {
     "KernelReport",
     "PassStage",
     "remove_if_missing",
+    "Reference",
+    "named_factory",
+    "optional_service",
+    "one_or_many",
 }
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from .alias_of import AliasOf
 from .configure import configure
 from .env import MISSING, Missing, env
+from .one_or_many import one_or_many
 from .parameters import parameters
 
-__all__ = ["MISSING", "AliasOf", "Missing", "configure", "env", "parameters"]
+__all__ = ["MISSING", "AliasOf", "Missing", "configure", "env", "one_or_many", "parameters"]

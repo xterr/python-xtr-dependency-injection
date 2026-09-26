@@ -67,6 +67,7 @@ from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 from .booted_kernel import BootedKernel, call_injected
 from .compiled_kernel import CompiledKernel
 from .kernel_bundle import KernelBundle
+from .share_dir import share_dir
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Sequence
@@ -518,8 +519,9 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
     """Register the ``kernel.*`` parameters into ``state`` before any bundle's ``build`` runs.
 
     The kernel exposes ``kernel.name``, ``kernel.environment``, ``kernel.debug``,
-    ``kernel.project_dir`` and ``kernel.bundles`` (name → class) from the very
-    beginning of the container build; every bundle's hook may read them.
+    ``kernel.project_dir``, ``kernel.share_dir`` and ``kernel.bundles`` (name →
+    class) from the very beginning of the container build; every bundle's hook
+    may read them.
     """
     bundles_map = {type(bundle).metadata().name: qualified_name(type(bundle)) for bundle in bundles}
     state.add_parameters(
@@ -530,6 +532,7 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
                 "environment": environment,
                 "debug": debug,
                 "project_dir": str(project_dir),
+                "share_dir": str(share_dir(project_dir)),
                 "bundles": bundles_map,
             }
         },

@@ -13,11 +13,12 @@ from importlib.metadata import version
 from .builder import Decorates, Definition, Origin, ServiceKey
 from .builder.bundle_active import bundle_active
 from .builder.container_builder import ContainerBuilder
+from .builder.named_factory import named_factory
 from .builder.service_configurator import ServiceConfigurator
 from .bundle import Bundle, BundleMetadata, NoConfig, RequiredBundle, as_bundle, required_bundle
 from .compiler.compiler_pass_interface import CompilerPassInterface
 from .compiler.pass_stage import PassStage
-from .config import AliasOf, configure, env, parameters
+from .config import AliasOf, configure, env, one_or_many, parameters
 from .decorator import (
     Autowire,
     AutowireDecorated,
@@ -47,9 +48,11 @@ from .runtime import (
     EnvVarLoaderInterface,
     EnvVarProcessor,
     EnvVarProcessorInterface,
+    Reference,
     ServiceLocator,
     ServicesResetter,
     bind_callable,
+    optional_service,
 )
 from .scan import DEFAULT_EXCLUDES
 
@@ -79,6 +82,7 @@ __all__ = [
     "Origin",
     "ParameterBagInterface",
     "PassStage",
+    "Reference",
     "RequiredBundle",
     "ServiceConfigurator",
     "ServiceKey",
@@ -99,8 +103,11 @@ __all__ = [
     "env",
     "exclude",
     "is_container_supplied",
+    "named_factory",
     "on_boot",
     "on_shutdown",
+    "one_or_many",
+    "optional_service",
     "parameters",
     "qualified_name",
     "remove_if_missing",
