@@ -8,7 +8,7 @@ __all__ = ["DecoratorSignatureError"]
 
 
 class DecoratorSignatureError(DependencyInjectionError):
-    """A decorator does not have exactly one ``Inner[T]`` parameter of the decorated type."""
+    """A decorator lacks exactly one ``AutowireDecorated`` parameter of the decorated type."""
 
     decorator: str
     reason: str

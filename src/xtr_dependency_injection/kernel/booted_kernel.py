@@ -7,11 +7,15 @@ from typing import TYPE_CHECKING, cast, final
 
 import wireup
 
+from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
+from xtr_dependency_injection.runtime.wireup_container import WireupContainer
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from types import TracebackType
 
     from wireup import AsyncContainer
+    from xtr_service_contracts import ContainerInterface
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
 
@@ -30,9 +34,9 @@ class BootedKernel:
             bus = await booted.container.get(MessageBusInterface)
     """
 
-    __slots__ = ("_bundles", "_on_shutdown", "_shut_down", "container", "kernel")
+    __slots__ = ("_bundles", "_engine", "_on_shutdown", "_shut_down", "container", "kernel")
 
-    container: AsyncContainer
+    container: ContainerInterface
     kernel: KernelInterface
 
     def __init__(
@@ -43,7 +47,8 @@ class BootedKernel:
         on_shutdown: Sequence[Callable[..., object]],
     ) -> None:
         """Hold what shutdown needs: the booted bundles and the application's hooks."""
-        self.container = container
+        self._engine = container
+        self.container = WireupContainer(container)
         self.kernel = kernel
         self._bundles = tuple(bundles)
         self._on_shutdown = tuple(on_shutdown)
@@ -52,22 +57,27 @@ class BootedKernel:
     async def shutdown(self) -> None:
         """Run the application's ``@on_shutdown`` hooks, then every bundle's, then close.
 
-        Bundles shut down in reverse order; closing the container runs every
-        generator factory's cleanup. Every step runs even if one before it
-        raised; all errors are raised together. A second call does nothing.
+        Bundles shut down in reverse order; the container is always closed —
+        running every generator factory's cleanup — even when a step aborts.
+        An ``Exception`` from any step does not stop the others, and they are
+        raised together once the container has closed; a ``BaseException`` (a
+        cancellation) closes the container, then propagates. A second call
+        does nothing.
 
         Raises:
-            ExceptionGroup: If any step raised.
+            ExceptionGroup: If any step raised an ``Exception``.
         """
         if self._shut_down:
             return
         self._shut_down = True
         errors: list[Exception] = []
-        for hook in self._on_shutdown:
-            await _attempt(errors, lambda hook=hook: call_injected(self.container, hook))
-        for bundle in reversed(self._bundles):
-            await _attempt(errors, lambda bundle=bundle: bundle.shutdown(self.container))
-        await _attempt(errors, self.container.close)
+        try:
+            for hook in self._on_shutdown:
+                await _attempt(errors, lambda hook=hook: call_injected(self._engine, hook))
+            for bundle in reversed(self._bundles):
+                await _attempt(errors, lambda bundle=bundle: bundle.shutdown())
+        finally:
+            await _attempt(errors, self._engine.close)
         if errors:
             msg = "the kernel failed to shut down cleanly"
             raise ExceptionGroup(msg, errors)
@@ -91,10 +101,40 @@ async def call_injected(container: AsyncContainer, fn: Callable[..., object]) ->
 
     Sync or async; an awaitable result is awaited.
     """
-    result: object = wireup.inject_from_container(container)(fn)()
+    prepared = _prepare_for_engine(fn)
+    result: object = wireup.inject_from_container(container)(prepared)()
     if inspect.isawaitable(result):
         return cast("object", await result)
     return result
+
+
+def _prepare_for_engine(fn: Callable[..., object]) -> Callable[..., object]:
+    """Return ``fn`` — or a wrapper — with our markers rewritten to wireup's.
+
+    The wrapper is only created when ``fn``'s signature carries our markers;
+    unchanged signatures pass through untouched so wireup keeps seeing the
+    original callable and its introspection stays honest.
+    """
+    original = inspect.signature(fn, eval_str=True)
+    rewritten = to_engine_signature(original)
+    if rewritten is original:
+        return fn
+
+    async def acall(**kwargs: object) -> object:
+        result: object = fn(**kwargs)
+        if inspect.isawaitable(result):
+            return cast("object", await result)
+        return result
+
+    def scall(**kwargs: object) -> object:
+        return fn(**kwargs)
+
+    wrapper: Callable[..., object] = acall if inspect.iscoroutinefunction(fn) else scall
+    setattr(wrapper, "__signature__", rewritten)  # noqa: B010 — wireup reads inspect.signature.
+    for attribute in ("__name__", "__qualname__", "__module__"):
+        if hasattr(fn, attribute):
+            setattr(wrapper, attribute, getattr(fn, attribute))
+    return wrapper
 
 
 async def _attempt(errors: list[Exception], step: Callable[[], object]) -> None:

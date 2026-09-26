@@ -50,10 +50,10 @@ def configure(fn: F | None = None, /, *, priority: int = 0) -> F | Callable[[F],
     under ``TYPE_CHECKING``.
     """
 
-    def decorate(target: F) -> F:
+    def record(target: F) -> F:
         return set_marker(target, _CONFIGURE, ConfigureMarker(priority))
 
-    return decorate(fn) if fn is not None else decorate
+    return record(fn) if fn is not None else record
 
 
 def configure_of(obj: object) -> ConfigureMarker | None:

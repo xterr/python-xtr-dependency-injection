@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, final
 
 from xtr_dependency_injection.exception import KernelAlreadyBootedError
+from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 from .booted_kernel import BootedKernel, call_injected
 
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from wireup import AsyncContainer
+    from xtr_service_contracts import ContainerInterface
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
     from xtr_dependency_injection.diagnostics import KernelReport
@@ -29,16 +31,23 @@ class CompiledKernel:
 
     The container exists already, so a framework integration can be wired
     before the application starts; ``lifespan`` then boots and shuts down
-    around the application's life::
-
-        compiled = kernel.build()
-        app = FastAPI(lifespan=compiled.lifespan)
-        wireup.integration.fastapi.setup(compiled.container, app)
+    around the application's life. Framework integrations that need the
+    engine container use ``engine_container(compiled)`` from
+    ``xtr_dependency_injection.integration.wireup`` (todo 23).
     """
 
-    __slots__ = ("_booted", "_bundles", "_info", "_on_boot", "_on_shutdown", "container", "report")
+    __slots__ = (
+        "_booted",
+        "_bundles",
+        "_engine",
+        "_info",
+        "_on_boot",
+        "_on_shutdown",
+        "container",
+        "report",
+    )
 
-    container: AsyncContainer
+    container: ContainerInterface
     report: KernelReport
 
     def __init__(  # noqa: PLR0913 — everything boot and shutdown need.
@@ -52,7 +61,8 @@ class CompiledKernel:
         on_shutdown: Sequence[Callable[..., object]],
     ) -> None:
         """Hold the container and everything boot and shutdown run."""
-        self.container = container
+        self._engine = container
+        self.container = WireupContainer(container)
         self.report = report
         self._info = info
         self._bundles = tuple(bundles)
@@ -75,18 +85,20 @@ class CompiledKernel:
         booted: list[AnyBundle] = []
         try:
             for bundle in self._bundles:
-                await bundle.boot(self.container)
+                # Symfony's setContainer: bundles see the container before their boot runs.
+                bundle.container = self.container
+                await bundle.boot()
                 booted.append(bundle)
             for hook in self._on_boot:
-                _ = await call_injected(self.container, hook)
-        except Exception as error:
-            partial = BootedKernel(self.container, self._info, booted, ())
+                _ = await call_injected(self._engine, hook)
+        except BaseException as error:
+            partial = BootedKernel(self._engine, self._info, booted, ())
             try:
                 await partial.shutdown()
             except ExceptionGroup as cleanup:
                 error.add_note(f"shutting down after the failed boot also failed: {cleanup!r}")
             raise
-        return BootedKernel(self.container, self._info, self._bundles, self._on_shutdown)
+        return BootedKernel(self._engine, self._info, self._bundles, self._on_shutdown)
 
     def lifespan(self, app: object, /) -> AbstractAsyncContextManager[None]:
         """Return an ASGI-style lifespan: boot on enter, shut down on exit."""

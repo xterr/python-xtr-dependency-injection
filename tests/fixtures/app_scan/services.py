@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from wireup import injectable
-
 from tests.fixtures.app_scan.helpers import Imported
+from xtr_dependency_injection.decorator.as_service import as_service
 from xtr_dependency_injection.decorator.exclude import exclude
 
 __all__ = ["Hidden", "Imported", "Marked", "Plain", "plain_function"]
 
 
-@injectable
+@as_service()
 class Marked:
     pass
 

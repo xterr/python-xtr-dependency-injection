@@ -58,7 +58,7 @@ def on_shutdown_of(obj: object) -> LifecycleMarker | None:
 
 
 def _marking(name: str, fn: F | None, priority: int) -> F | Callable[[F], F]:
-    def decorate(target: F) -> F:
+    def record(target: F) -> F:
         return set_marker(target, name, LifecycleMarker(priority))
 
-    return decorate(fn) if fn is not None else decorate
+    return record(fn) if fn is not None else record

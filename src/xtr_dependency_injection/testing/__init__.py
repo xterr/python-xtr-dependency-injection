@@ -34,24 +34,28 @@ async def boot_for_test(
             ...
     """
     compiled = kernel.with_env(env).build()
+    engine = compiled._engine  # noqa: SLF001 — testing helper unwraps the kernel-owned engine.  # pyright: ignore[reportPrivateUsage]
     for key, replacement in overrides.items():
         provided, qualifier = key if isinstance(key, tuple) else (key, None)
-        compiled.container.override.set(provided, replacement, qualifier=qualifier)
+        engine.override.set(provided, replacement, qualifier=qualifier)
     return await compiled.boot()
 
 
 async def assert_zero_config(bundle_cls: type[AnyBundle], /) -> None:
     """Build, boot and shut down a kernel of ``bundle_cls`` alone, with its default config.
 
-    Its requirements come from what is installed; nothing is scanned. Call it
-    from every bundle's test suite: a bundle that arrives transitively must
-    work without the application configuring it.
+    Its requirements come from ``@required_bundle`` declarations; nothing is
+    scanned. Call it from every bundle's test suite: a bundle that arrives
+    transitively must work without the application configuring it.
 
     Raises:
         Exception: Whatever building, booting or shutting down raised.
     """
-    metadata = bundle_cls.metadata()
-    env = metadata.envs[0] if metadata.envs else "test"
-    kernel = Kernel(bundle_cls.__module__, env=env, bundles=[bundle_cls()], resources=())
+    kernel = Kernel(
+        bundle_cls.__module__,
+        env="test",
+        bundles={bundle_cls: {"all": True}},
+        resources=(),
+    )
     booted = await kernel.boot()
     await booted.shutdown()

@@ -1,6 +1,6 @@
 [project]
 name = "xtr-dependency-injection"
-version = "1.0.1"
+version = "1.1.0"
 description = "A Symfony-style bundle and kernel layer for the xtr libraries, compiled to a wireup container."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "wireup>=2.12,<3",
     "typing-extensions>=4.4",
+    "xtr-service-contracts>=1.0,<2",
 ]
 
 [dependency-groups]
@@ -56,9 +57,16 @@ reportPrivateUsage = "error"
 
 # wireup exposes no public accessor for its return-type keying rule; the
 # bridge wraps that gap in one place so nothing else has to (§9.4 of the plan).
+# Any/Unknown flags mirror the compiler-wide relaxation below because more
+# specific execution environments replace, not merge.
 [[tool.basedpyright.executionEnvironments]]
 root = "src/xtr_dependency_injection/compiler/_wireup_bridge.py"
 reportPrivateUsage = "none"
+reportAny = "none"
+reportExplicitAny = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
 
 # Signature synthesis wraps arbitrary factories: what they take and produce is
 # unknowable statically, so Any is the honest type here. Scoped to the
@@ -132,6 +140,10 @@ unfixable = []
 # none of them can be deferred into a TYPE_CHECKING block.
 "tests/contract/*.py" = ["TC001", "TC002", "TC003"]
 "tests/fixtures/**/*.py" = ["TC001", "TC002", "TC003"]
+# The container_interface factory in kernel_bundle.py is registered with
+# wireup, which reads AsyncContainer / ContainerInterface from its annotations
+# at runtime; both imports must stay outside a TYPE_CHECKING block.
+"src/xtr_dependency_injection/kernel/kernel_bundle.py" = ["TC001", "TC002", "TC003"]
 "tests/**/*.py" = [
     "S101",    # assert is the point of pytest
     "S603",    # a fresh interpreter is the only way to assert a module was never imported

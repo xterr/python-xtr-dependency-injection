@@ -18,15 +18,17 @@ from fnmatch import fnmatchcase
 from types import ModuleType
 from typing import TYPE_CHECKING, Final, cast, final
 
-from xtr_dependency_injection.compiler._wireup_bridge import declaration_of
 from xtr_dependency_injection.config.configure import configure_of
 from xtr_dependency_injection.config.parameters import is_parameters
+from xtr_dependency_injection.decorator.as_alias import aliases_of
 from xtr_dependency_injection.decorator.as_decorator import decorator_of
+from xtr_dependency_injection.decorator.as_service import service_of
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass_of
 from xtr_dependency_injection.decorator.exclude import is_excluded
 from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown_of
 from xtr_dependency_injection.decorator.when import matches_env, when_envs_of, when_not_envs_of
 from xtr_dependency_injection.exception import ConfigProviderError, ResourceImportError
+from xtr_dependency_injection.exception._naming import qualified_name
 
 from .scanned_object import ScannedObject
 
@@ -35,13 +37,13 @@ if TYPE_CHECKING:
 
 __all__ = ["ScanResult", "Scanner"]
 
-_QUEUES: Final[tuple[tuple[str, Callable[[object], object]], ...]] = (
-    ("@configure", configure_of),
-    ("@parameters", lambda obj: is_parameters(obj) or None),
-    ("@compiler_pass", compiler_pass_of),
-    ("@on_boot", on_boot_of),
-    ("@on_shutdown", on_shutdown_of),
-    ("@as_decorator", decorator_of),
+_QUEUES: Final[tuple[tuple[str, str, Callable[[object], object]], ...]] = (
+    ("@configure", "configure", configure_of),
+    ("@parameters", "parameters", lambda obj: is_parameters(obj) or None),
+    ("@compiler_pass", "compiler_passes", compiler_pass_of),
+    ("@on_boot", "on_boot", on_boot_of),
+    ("@on_shutdown", "on_shutdown", on_shutdown_of),
+    ("@as_decorator", "decorators", decorator_of),
 )
 _EARLY_ONLY: Final = frozenset({"@configure", "@parameters"})
 
@@ -57,9 +59,9 @@ class ScanResult:
         on_boot: ``@on_boot`` hooks.
         on_shutdown: ``@on_shutdown`` hooks.
         decorators: ``@as_decorator`` classes and factories.
-        declared: Objects marked with wireup's ``@injectable``.
-        services: Every service candidate — the declared ones included —
-            for autoconfiguration.
+        marked: Objects carrying ``@as_service`` or ``@as_alias``.
+        services: Every service candidate — the marked ones included — for
+            autoconfiguration.
     """
 
     configure: list[ScannedObject] = field(default_factory=list)
@@ -68,8 +70,14 @@ class ScanResult:
     on_boot: list[ScannedObject] = field(default_factory=list)
     on_shutdown: list[ScannedObject] = field(default_factory=list)
     decorators: list[ScannedObject] = field(default_factory=list)
-    declared: list[ScannedObject] = field(default_factory=list)
+    marked: list[ScannedObject] = field(default_factory=list)
     services: list[ScannedObject] = field(default_factory=list)
+
+    def extend(self, other: ScanResult) -> None:
+        """Append everything ``other`` found to this result, queue by queue, in order."""
+        for field_name in ScanResult.__dataclass_fields__:
+            into = cast("list[ScannedObject]", getattr(self, field_name))
+            into.extend(cast("list[ScannedObject]", getattr(other, field_name)))
 
 
 @final
@@ -138,7 +146,7 @@ class Scanner:
                 continue
             self._seen.add(id(obj))
             self._order += 1
-            yield ScannedObject(obj, f"{module.__name__}:{obj.__qualname__}", owner, self._order)
+            yield ScannedObject(obj, qualified_name(obj), owner, self._order)
 
     def _classify(self, scanned: ScannedObject, result: ScanResult, *, late: bool) -> None:
         obj = scanned.obj
@@ -147,34 +155,23 @@ class Scanner:
         if not matches_env(obj, self._env):
             self.skipped.append((scanned.name, _env_reason(obj, self._env)))
             return
-        markers = [label for label, read in _QUEUES if read(obj) is not None]
-        if len(markers) > 1:
-            raise ConfigProviderError(
-                scanned.name, f"{' and '.join(markers)} exclude each other on one object"
-            )
-        if markers:
-            if late and markers[0] in _EARLY_ONLY:
+        matched = [(label, field) for label, field, read in _QUEUES if read(obj) is not None]
+        if len(matched) > 1:
+            labels = " and ".join(label for label, _ in matched)
+            raise ConfigProviderError(scanned.name, f"{labels} exclude each other on one object")
+        if matched:
+            label, field = matched[0]
+            if late and label in _EARLY_ONLY:
                 raise ConfigProviderError(
                     scanned.name,
-                    f"{markers[0]} was found by a scan requested while loading bundles, "  # noqa: ISC003
+                    f"{label} was found by a scan requested while loading bundles, "  # noqa: ISC003
                     + "after configs were resolved; put it in an early resource",
                 )
-            _queue(result, markers[0]).append(scanned)
+            cast("list[ScannedObject]", getattr(result, field)).append(scanned)
             return
-        if declaration_of(obj) is not None:
-            result.declared.append(scanned)
+        if service_of(obj) is not None or aliases_of(obj):
+            result.marked.append(scanned)
         result.services.append(scanned)
-
-
-def _queue(result: ScanResult, marker: str) -> list[ScannedObject]:
-    return {
-        "@configure": result.configure,
-        "@parameters": result.parameters,
-        "@compiler_pass": result.compiler_passes,
-        "@on_boot": result.on_boot,
-        "@on_shutdown": result.on_shutdown,
-        "@as_decorator": result.decorators,
-    }[marker]
 
 
 def _import(name: str) -> ModuleType:

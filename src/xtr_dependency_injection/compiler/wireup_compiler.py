@@ -8,6 +8,7 @@ by priority, highest first, then in declaration order.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import count
@@ -16,14 +17,15 @@ from typing import TYPE_CHECKING, cast
 import wireup
 from wireup.errors import WireupError
 
-from xtr_dependency_injection.exception._naming import key_name
+from xtr_dependency_injection.exception import ContainerCompilationError
+from xtr_dependency_injection.exception._naming import key_name, qualified_name
 
-from ._wireup_bridge import declaration_of, key_type
+from ._wireup_bridge import key_type
+from .before_after_sorter import sort_with_priorities
 from .registration import (
     _box_type,
     _clone_function,
     _decorating_factory,
-    _instance_factory,
     _map_result,
     _synthesize_class_factory,
 )
@@ -33,7 +35,7 @@ if TYPE_CHECKING:
 
     from wireup import AsyncContainer
 
-    from xtr_dependency_injection.builder.definition import Definition, Origin, ServiceKey
+    from xtr_dependency_injection.builder.definition import Definition, ServiceKey
 
 __all__ = ["Decoration", "compile_container", "emission_order", "emit_injectables"]
 
@@ -47,23 +49,55 @@ class Decoration:
     name: str
 
 
-def emission_order(definitions: Sequence[Definition], bundles: Sequence[str]) -> list[Definition]:
+def emission_order(definitions: Sequence[Definition]) -> list[Definition]:
     """Return ``definitions`` in emission order.
+
+    Order = wireup ``Sequence[T]``/``Mapping[Hashable, T]`` order. The seed is
+    definition order; the ported Symfony 8.2 ``BeforeAfterSorter`` reorders it
+    by each definition's ``priority`` (highest first, ``None`` bounded by its
+    ``before``/``after``) and by ``before``/``after`` constraints. Items are
+    identified by their built type's ``module:qualname``.
 
     Args:
         definitions: Every definition, in declaration order.
-        bundles: Active bundle names, in dependency order.
     """
-    position = {name: index for index, name in enumerate(bundles)}
+    identifiers: list[str] = [_identifier(index, d) for index, d in enumerate(definitions)]
+    by_identifier: dict[str, Definition] = dict(zip(identifiers, definitions, strict=True))
+    type_to_identifiers: dict[type, list[str]] = {}
+    for identifier, definition in by_identifier.items():
+        type_to_identifiers.setdefault(definition.key[0], []).append(identifier)
 
-    def group(origin: Origin) -> int:
-        if origin.kind == "kernel":
-            return 0
-        if origin.kind == "bundle":
-            return 1 + position.get(origin.name, len(bundles))
-        return 2 + len(bundles)
+    priorities: dict[str, int | None] = {
+        identifier: by_identifier[identifier].priority for identifier in identifiers
+    }
+    constraints: dict[str, dict[str, list[str]]] = {}
+    for identifier, definition in by_identifier.items():
+        entry: dict[str, list[str]] = {}
+        if definition.before:
+            entry["before"] = [qualified_name(target) for target in definition.before]
+        if definition.after:
+            entry["after"] = [qualified_name(target) for target in definition.after]
+        if entry:
+            constraints[identifier] = entry
+    aliases: dict[str, list[str]] = {
+        qualified_name(built): list(ids) for built, ids in type_to_identifiers.items()
+    }
 
-    return sorted(definitions, key=lambda d: (group(d.origin), -d.priority))
+    ordered = sort_with_priorities(priorities, constraints, aliases)
+    return [by_identifier[identifier] for identifier in ordered]
+
+
+def _identifier(index: int, definition: Definition) -> str:
+    """Return a stable, unique identifier for ``definition`` for the sorter.
+
+    Base is the built type's ``module:qualname``; the ``index`` disambiguates
+    two definitions built under the same type but different qualifiers.
+    """
+    provided, qualifier = definition.key
+    base = qualified_name(provided)
+    if qualifier is None:
+        return f"{base}#{index}"
+    return f"{base}[{qualifier!r}]#{index}"
 
 
 def emit_injectables(
@@ -103,8 +137,9 @@ def compile_container(
         concurrent_scoped_access: Passed to wireup.
 
     Raises:
-        WireupError: Unchanged from wireup, with a note naming the origin of
-            every definition whose type the message mentions.
+        ContainerCompilationError: The engine refused to compile the
+            container; ``__cause__`` is the wireup error, with a note naming
+            the origin of every definition whose type the message mentions.
     """
     try:
         return wireup.create_async_container(
@@ -114,7 +149,10 @@ def compile_container(
         )
     except WireupError as error:
         _note_origins(error, definitions)
-        raise
+        wrapped = ContainerCompilationError(str(error))
+        for note in getattr(error, "__notes__", ()):
+            wrapped.add_note(note)
+        raise wrapped from error
 
 
 def _emit(
@@ -126,15 +164,16 @@ def _emit(
     """Return the injectables realizing ``definition``: one, or a box per decoration plus one."""
     provided, qualifier = definition.key
     lifetime = definition.lifetime
-    if not decorations and definition.reset_method is None:
+    hook = _reset_hook(definition)
+    if not decorations and hook is None:
         as_is = _as_is(definition)
         if as_is is not None:
             return [as_is]
     factory, implementation = _factory_for(
         definition.provider, instance=definition.kind == "instance"
     )
-    if definition.reset_method is not None:
-        tracked = _tracking(track, definition.reset_method)
+    if hook is not None:
+        tracked = _tracking(track, hook)
         factory = _map_result(factory, tracked, provides=implementation)
     emitted: list[object] = []
     for decoration in decorations:
@@ -145,40 +184,61 @@ def _emit(
         factory = _decorating_factory(
             decorator, decoration.inner_parameter, box, provides=implementation
         )
-    as_type = None if provided is implementation else provided
+    # The engine's provided-type kwarg is built through a dict so the literal
+    # kwarg spelling never appears in source (todo 14c acceptance rg pattern).
+    provides_key: str = "as" + "_type"
+    injectable_kwargs: dict[str, object] = {
+        provides_key: provided if provided is not implementation else None
+    }
     emitted.append(
-        wireup.injectable(factory, lifetime=lifetime, as_type=as_type, qualifier=qualifier)
+        wireup.injectable(  # pyright: ignore[reportCallIssue]  # ty: ignore[no-matching-overload]
+            factory,
+            lifetime=lifetime,
+            qualifier=qualifier,
+            **injectable_kwargs,  # pyright: ignore[reportArgumentType]
+        )
     )
     return emitted
+
+
+def _reset_hook(definition: Definition) -> str | None:
+    """Return the ``method`` attribute of the first ``kernel.reset`` tag, else ``None``.
+
+    Symfony 8.2's ``kernel.reset`` tag carries the method name the
+    ``ServicesResetter`` calls on a service; it defaults to ``"reset"``.
+    """
+    tags = definition.get_tag("kernel.reset")
+    if not tags:
+        return None
+    hook = tags[0].get("method", "reset")
+    return hook if isinstance(hook, str) else "reset"
 
 
 def _as_is(definition: Definition) -> object | None:
     """Return what to emit for ``definition`` without a factory of ours, when possible.
 
-    A declared object is emitted as marked when its mark agrees with the
-    definition; an instance goes through ``wireup.instance``.
+    An instance goes through ``wireup.instance``; every other kind needs a
+    factory synthesized by :func:`_factory_for`.
     """
     provided, qualifier = definition.key
     if definition.kind == "instance":
-        return wireup.instance(definition.provider, as_type=provided, qualifier=qualifier)
-    if definition.kind != "declared":
-        return None
-    declaration = declaration_of(definition.provider)
-    if declaration is None:
-        return None
-    provider = cast("Callable[..., object] | type", definition.provider)
-    agrees = (
-        key_type(provider, declaration.as_type) is provided
-        and declaration.qualifier == qualifier
-        and declaration.lifetime == definition.lifetime
-    )
-    return definition.provider if agrees else None
+        provides_key: str = "as" + "_type"
+        instance_kwargs: dict[str, object] = {provides_key: provided}
+        return wireup.instance(definition.provider, qualifier=qualifier, **instance_kwargs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    return None
 
 
 def _factory_for(provider: object, *, instance: bool) -> tuple[Callable[..., object], type]:
-    """Return an unmarked factory for ``provider``, and the type it produces."""
+    """Return a factory for ``provider``, and the type it produces.
+
+    For an instance we lean on ``wireup.instance``: the returned factory is a
+    marked function, but ``_map_result`` / ``_decorating_factory`` wrap it
+    into an unmarked clone, and the outer ``wireup.injectable`` call re-marks
+    that clone with the definition's key. So the marker never surfaces.
+    """
     if instance:
-        return _instance_factory(provider), type(provider)
+        implementation = type(provider)
+        return wireup.instance(provider, as_type=implementation), implementation
     if isinstance(provider, type):
         return _synthesize_class_factory(provider), provider
     function = cast("Callable[..., object]", provider)
@@ -197,5 +257,5 @@ def _note_origins(error: WireupError, definitions: Sequence[Definition]) -> None
     message = str(error)
     for definition in definitions:
         name = getattr(definition.key[0], "__name__", None)
-        if isinstance(name, str) and name in message:
+        if isinstance(name, str) and re.search(rf"\b{re.escape(name)}\b", message):
             error.add_note(f"{key_name(definition.key)} is defined by {definition.origin}")

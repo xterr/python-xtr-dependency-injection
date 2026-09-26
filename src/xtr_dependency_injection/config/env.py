@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 __all__ = ["MISSING", "Missing", "env"]
 
 T = TypeVar("T")
+D = TypeVar("D")
 
 _TRUE: Final = frozenset({"1", "true", "yes", "on"})
 _FALSE: Final = frozenset({"0", "false", "no", "off", ""})
@@ -37,9 +38,13 @@ MISSING: Final = Missing.MISSING
 
 
 @overload
-def env(name: str, /, *, default: str | Missing = MISSING) -> str: ...
+def env(name: str, /) -> str: ...
 @overload
-def env(name: str, cast: Callable[[str], T], /, *, default: T | Missing = MISSING) -> T: ...
+def env(name: str, /, *, default: D) -> str | D: ...
+@overload
+def env(name: str, cast: Callable[[str], T], /) -> T: ...
+@overload
+def env(name: str, cast: Callable[[str], T], /, *, default: D) -> T | D: ...
 def env(
     name: str,
     cast: Callable[[str], object] = str,

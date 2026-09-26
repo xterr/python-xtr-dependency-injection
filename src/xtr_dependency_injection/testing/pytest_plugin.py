@@ -24,7 +24,7 @@ from . import boot_for_test
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from wireup import AsyncContainer
+    from xtr_service_contracts import ContainerInterface
 
     from xtr_dependency_injection.kernel.booted_kernel import BootedKernel
     from xtr_dependency_injection.kernel.kernel import Kernel
@@ -49,6 +49,6 @@ async def booted_kernel(xtr_kernel: Kernel) -> AsyncIterator[BootedKernel]:
 
 
 @pytest.fixture
-def container(booted_kernel: BootedKernel) -> AsyncContainer:
+def container(booted_kernel: BootedKernel) -> ContainerInterface:
     """Return the booted kernel's container."""
     return booted_kernel.container

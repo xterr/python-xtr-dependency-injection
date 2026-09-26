@@ -26,34 +26,37 @@ class ServicesResetter:
 
     def __init__(self) -> None:
         """Track nothing yet: services are tracked as the container builds them."""
-        self._tracked: list[tuple[Callable[[], object | None], str]] = []
+        self._tracked: dict[int, tuple[Callable[[], object | None], str]] = {}
 
     def track(self, instance: object, method: str) -> None:
         """Remember ``instance``, to call its ``method`` on every :meth:`reset`.
 
         Held weakly when it can be: a scoped or transient service is built
-        again and again, and must not be kept alive by being resettable.
+        again and again, and must not be kept alive by being resettable. When
+        a weakly held instance is collected the entry is dropped immediately,
+        so a long-running worker never accumulates dead references.
         """
-        if any(tracked() is instance for tracked, _ in self._tracked):
+        key = id(instance)
+        if key in self._tracked:
             return
         try:
-            reference: Callable[[], object | None] = weakref.ref(instance)
+            reference: Callable[[], object | None] = weakref.ref(
+                instance,
+                lambda _ref, key=key: self._tracked.pop(key, None),
+            )
         except TypeError:
             reference = _strong(instance)
-        self._tracked.append((reference, method))
+        self._tracked[key] = (reference, method)
 
     async def reset(self) -> None:
         """Call each tracked service's reset method, in tracking order; sync or async."""
-        alive: list[tuple[Callable[[], object | None], str]] = []
-        for reference, method in self._tracked:
+        for reference, method in list(self._tracked.values()):
             instance = reference()
             if instance is None:
                 continue
-            alive.append((reference, method))
             result = cast("object", getattr(instance, method)())
             if inspect.isawaitable(result):
                 await result
-        self._tracked = alive
 
 
 def _strong(instance: object) -> Callable[[], object]:

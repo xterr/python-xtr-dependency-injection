@@ -11,6 +11,7 @@ from xtr_dependency_injection.exception import (
     CircularBundleDependencyError,
     ConfigProviderError,
     ConflictingConfigProvidersError,
+    ContainerCompilationError,
     DecoratorSignatureError,
     DependencyInjectionError,
     DuplicateBundleError,
@@ -21,7 +22,10 @@ from xtr_dependency_injection.exception import (
     MissingBundleError,
     MissingEnvironmentVariableError,
     ParameterConflictError,
+    ParameterNotFoundError,
     ResourceImportError,
+    ServiceNotFoundError,
+    ServiceResolutionError,
     UnknownConfigTypeError,
     UnknownLocatorKeyError,
     UnknownServiceError,
@@ -166,10 +170,11 @@ def test_unknown_service_error_names_the_operation() -> None:
 
 
 def test_decorator_signature_error_carries_the_decorator_and_reason() -> None:
-    error = DecoratorSignatureError("app:Tracing", "no Inner[...] parameter")
+    reason = "no AutowireDecorated parameter"
+    error = DecoratorSignatureError("app:Tracing", reason)
 
-    assert (error.decorator, error.reason) == ("app:Tracing", "no Inner[...] parameter")
-    assert str(error) == "invalid decorator app:Tracing: no Inner[...] parameter"
+    assert (error.decorator, error.reason) == ("app:Tracing", reason)
+    assert str(error) == f"invalid decorator app:Tracing: {reason}"
 
 
 def test_builder_phase_error_names_the_operation_and_phase() -> None:
@@ -204,3 +209,35 @@ def test_unknown_locator_key_error_shows_none_when_empty() -> None:
 def test_a_raised_error_is_caught_as_the_root() -> None:
     with pytest.raises(DependencyInjectionError):
         raise BuilderFrozenError("scan")
+
+
+def test_service_not_found_error_is_a_lookup_error() -> None:
+    error = ServiceNotFoundError((Sample, "q"))
+
+    assert error.key == (Sample, "q")
+    assert isinstance(error, LookupError)
+    assert str(error) == f"{__name__}.Sample['q'] is not registered in the container"
+
+
+def test_parameter_not_found_error_is_a_lookup_error() -> None:
+    error = ParameterNotFoundError("kernel.nope")
+
+    assert error.name == "kernel.nope"
+    assert isinstance(error, LookupError)
+    assert str(error) == "parameter 'kernel.nope' is not defined"
+
+
+def test_container_compilation_error_carries_the_engine_message() -> None:
+    error = ContainerCompilationError("cannot build service X")
+
+    assert error.reason == "cannot build service X"
+    assert str(error) == "cannot build service X"
+    assert isinstance(error, DependencyInjectionError)
+
+
+def test_service_resolution_error_carries_the_key() -> None:
+    error = ServiceResolutionError((Sample, "q"))
+
+    assert error.key == (Sample, "q")
+    assert str(error) == f"failed to resolve {__name__}.Sample['q'] from the container"
+    assert isinstance(error, DependencyInjectionError)

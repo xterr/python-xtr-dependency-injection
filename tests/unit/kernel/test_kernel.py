@@ -8,6 +8,7 @@ from wireup import Injected  # noqa: TC002 — main's annotations are read at ru
 
 from tests.fixtures.app_kernel.processing import Marker
 from tests.fixtures.app_kernel.services import DevOnly, Greeter
+from tests.fixtures.app_with_bundles import ListedBundle
 from tests.support.bundles import (
     EVENTS,
     ChorusBundle,
@@ -18,16 +19,27 @@ from tests.support.bundles import (
     FailingBootBundle,
     Plugin,
 )
-from xtr_dependency_injection.exception import InvalidEnvironmentError, KernelAlreadyBootedError
+from xtr_dependency_injection.exception import (
+    DuplicateServiceError,
+    InvalidEnvironmentError,
+    KernelAlreadyBootedError,
+)
 from xtr_dependency_injection.kernel import Kernel, KernelInterface
 from xtr_dependency_injection.runtime.services_resetter import ServicesResetter
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from xtr_dependency_injection.bundle.bundle import AnyBundle
 
 pytestmark = pytest.mark.anyio
 
 APP = "tests.fixtures.app_kernel"
+
+_DEFAULT_BUNDLES: dict[type[AnyBundle], Mapping[str, bool]] = {  # type: ignore[misc]
+    EchoBundle: {"all": True},
+    ChorusBundle: {"all": True},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +50,7 @@ def _clear_events() -> None:
 def _kernel(
     env: str = "dev",
     *,
-    bundles: list[AnyBundle] | None = None,
+    bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,  # type: ignore[misc]
     name: str | None = None,
     allowed_envs: tuple[str, ...] | None = None,
 ) -> Kernel:
@@ -46,7 +58,7 @@ def _kernel(
         APP,
         env=env,
         name=name,
-        bundles=bundles if bundles is not None else [EchoBundle(), ChorusBundle()],
+        bundles=bundles if bundles is not None else _DEFAULT_BUNDLES,
         allowed_envs=allowed_envs,
     )
 
@@ -134,9 +146,9 @@ async def test_the_kernel_is_a_service() -> None:
 async def test_kernel_parameters_are_injectable() -> None:
     compiled = _kernel(name="shop").build()
 
-    assert compiled.container.config.get("kernel.name") == "shop"
-    assert compiled.container.config.get("kernel.environment") == "dev"
-    assert compiled.container.config.get("echo.greeting") == "HELLO"
+    assert compiled.container.get_parameter("kernel.name") == "shop"
+    assert compiled.container.get_parameter("kernel.environment") == "dev"
+    assert compiled.container.get_parameter("echo.greeting") == "HELLO"
 
 
 async def test_an_env_excluded_object_is_not_collected() -> None:
@@ -156,7 +168,7 @@ async def test_autoconfigure_registers_tagged_candidates() -> None:
     assert type(alpha).__name__ == "TaggedPlugin"
 
 
-async def test_a_late_scan_registers_its_declared_services() -> None:
+async def test_a_late_scan_registers_its_marked_services() -> None:
     compiled = _kernel().build()
 
     assert "tests.fixtures.app_kernel_late" in compiled.report.scan.modules
@@ -218,7 +230,7 @@ async def test_a_compiled_kernel_boots_once() -> None:
 
 
 async def test_a_failed_boot_shuts_down_what_booted_and_propagates() -> None:
-    kernel = _kernel(bundles=[EchoBundle(), FailingBootBundle()])
+    kernel = _kernel(bundles={EchoBundle: {"all": True}, FailingBootBundle: {"all": True}})
 
     with pytest.raises(RuntimeError, match="boot failed"):
         _ = await kernel.boot()
@@ -227,7 +239,7 @@ async def test_a_failed_boot_shuts_down_what_booted_and_propagates() -> None:
 
 
 async def test_shutdown_errors_are_raised_together() -> None:
-    booted = await _kernel(bundles=[EchoBundle()]).boot()
+    booted = await _kernel(bundles={EchoBundle: {"all": True}}).boot()
 
     async def broken() -> None:
         raise ValueError("shutdown hook failed")
@@ -281,7 +293,10 @@ def test_run_refuses_a_non_int_result() -> None:
 
 
 def test_an_env_disabled_bundle_is_reported() -> None:
-    compiled = _kernel(env="prod", bundles=[EchoBundle(), DevOnlyBundle()]).build()
+    compiled = _kernel(
+        env="prod",
+        bundles={EchoBundle: {"all": True}, DevOnlyBundle: {"dev": True}},
+    ).build()
 
     states = {report.name: report.state for report in compiled.report.bundles}
 
@@ -293,3 +308,29 @@ def test_two_kernels_build_independent_containers() -> None:
     second = _kernel().build()
 
     assert first.container is not second.container
+
+
+def test_a_bundles_module_convention_activates_the_listed_bundle() -> None:
+    compiled = Kernel("tests.fixtures.app_with_bundles", env="dev").build()
+
+    names = {report.name for report in compiled.report.bundles if report.state == "active"}
+    assert "listed" in names
+    assert "kernel" in names
+    assert ListedBundle in {type(bundle) for bundle in compiled._bundles}
+
+
+def test_an_app_service_cannot_override_a_kernel_registered_service() -> None:
+    kernel = Kernel("tests.fixtures.app_kernel_clash", env="dev", bundles={})
+
+    with pytest.raises(DuplicateServiceError) as caught:
+        _ = kernel.build()
+
+    assert caught.value.first.kind == "kernel"
+    assert caught.value.second.kind == "app"
+
+
+def test_a_package_without_bundles_module_yields_only_the_kernel_bundle() -> None:
+    compiled = Kernel("tests.fixtures.app_kernel", env="dev", resources=()).build()
+
+    active = {report.name for report in compiled.report.bundles if report.state == "active"}
+    assert active == {"kernel"}

@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from wireup import Inject, injectable
-
 from tests.support.bundles import Echo, Plugin
+from xtr_dependency_injection.decorator.as_service import as_service
+from xtr_dependency_injection.decorator.autowire import Autowire
 from xtr_dependency_injection.decorator.when import when
 
 
-@injectable
+@as_service()
 class Greeter:
     def __init__(
-        self, echo: Echo, punctuation: Annotated[str, Inject(config="app.punctuation")]
+        self, echo: Echo, punctuation: Annotated[str, Autowire(param="app.punctuation")]
     ) -> None:
         self.echo: Echo = echo
         self.punctuation: str = punctuation
@@ -25,6 +25,6 @@ class TaggedPlugin(Plugin):
 
 
 @when("dev")
-@injectable
+@as_service()
 class DevOnly:
     pass

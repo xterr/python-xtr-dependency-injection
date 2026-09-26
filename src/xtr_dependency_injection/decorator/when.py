@@ -58,8 +58,8 @@ def matches_env(obj: object, env: str) -> bool:
 
 
 def _adding(name: str, envs: tuple[str, ...]) -> Callable[[T], T]:
-    def decorate(obj: T) -> T:
+    def record(obj: T) -> T:
         current = cast("frozenset[str] | None", own_marker(obj, name)) or frozenset()
         return set_marker(obj, name, current | frozenset(envs))
 
-    return decorate
+    return record

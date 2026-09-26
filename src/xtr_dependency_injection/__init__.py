@@ -10,61 +10,80 @@ from __future__ import annotations
 
 from importlib.metadata import version
 
-from .builder import Definition, Origin, ServiceKey
+from .builder import Decorates, Definition, Origin, ServiceKey
 from .builder.container_builder import ContainerBuilder
+from .builder.pass_stage import PassStage
 from .builder.service_configurator import ServiceConfigurator
-from .bundle import Bundle, BundleMetadata, NoConfig, as_bundle
-from .config import configure, env, parameters
-from .config.config_prepender import ConfigPrepender
+from .bundle import Bundle, BundleMetadata, NoConfig, RequiredBundle, as_bundle, required_bundle
+from .config import AliasOf, configure, env, parameters
 from .decorator import (
-    Inner,
+    Autowire,
+    AutowireDecorated,
+    Injected,
+    OnInvalid,
+    Target,
+    as_alias,
     as_decorator,
+    as_service,
+    as_tagged_item,
+    autoconfigure,
+    autoconfigure_tag,
     compiler_pass,
     exclude,
     on_boot,
     on_shutdown,
+    remove_if_missing,
     when,
     when_not,
 )
 from .diagnostics import KernelReport
-from .discovery import DiscoveredBundle, discover_bundles
 from .kernel import BootedKernel, CompiledKernel, Kernel, KernelInterface
 from .runtime import ServiceLocator, ServicesResetter, bind_callable
 from .scan import DEFAULT_EXCLUDES
-from .standalone import injectables
 
 __all__ = [
     "DEFAULT_EXCLUDES",
+    "AliasOf",
+    "Autowire",
+    "AutowireDecorated",
     "BootedKernel",
     "Bundle",
     "BundleMetadata",
     "CompiledKernel",
-    "ConfigPrepender",
     "ContainerBuilder",
+    "Decorates",
     "Definition",
-    "DiscoveredBundle",
-    "Inner",
+    "Injected",
     "Kernel",
     "KernelInterface",
     "KernelReport",
     "NoConfig",
+    "OnInvalid",
     "Origin",
+    "PassStage",
+    "RequiredBundle",
     "ServiceConfigurator",
     "ServiceKey",
     "ServiceLocator",
     "ServicesResetter",
+    "Target",
+    "as_alias",
     "as_bundle",
     "as_decorator",
+    "as_service",
+    "as_tagged_item",
+    "autoconfigure",
+    "autoconfigure_tag",
     "bind_callable",
     "compiler_pass",
     "configure",
-    "discover_bundles",
     "env",
     "exclude",
-    "injectables",
     "on_boot",
     "on_shutdown",
     "parameters",
+    "remove_if_missing",
+    "required_bundle",
     "when",
     "when_not",
 ]

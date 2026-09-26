@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, TypeVar, cast
 
 from xtr_dependency_injection.exception import BundleDefinitionError
 
-from .bundle import METADATA_ATTRIBUTE, AnyBundle, Bundle, NoConfig
+from .bundle import KERNEL_BUNDLE, METADATA_ATTRIBUTE, AnyBundle, Bundle, NoConfig
 from .bundle_metadata import BundleMetadata
 
 if TYPE_CHECKING:
@@ -19,31 +19,24 @@ __all__ = ["as_bundle", "declare_bundle"]
 B = TypeVar("B", bound=type[AnyBundle])
 
 _NAME: Final = re.compile(r"^[a-z][a-z0-9_]*$")
-_RESERVED: Final = frozenset({"kernel"})
+_RESERVED: Final = frozenset({KERNEL_BUNDLE})
 
 
-def as_bundle(  # noqa: PLR0913 — mirrors every field of BundleMetadata.
+def as_bundle(
     name: str,
     /,
     *,
     config: type[object] | None = None,
-    requires: Sequence[str] = (),
-    optional: Sequence[str] = (),
-    envs: Sequence[str] | None = None,
     resources: Sequence[str] = (),
 ) -> Callable[[B], B]:
     """Declare the decorated ``Bundle`` subclass as the bundle ``name``.
 
     Args:
         name: Lowercase letters, digits and underscores, starting with a
-            letter. ``"kernel"`` is reserved.
-        config: The config type ``load`` receives: a frozen dataclass or
-            msgspec Struct buildable with no arguments. ``None`` means
-            ``NoConfig``.
-        requires: Bundles that must be active too, else the build fails.
-        optional: Bundles this one is ordered after when they are active,
-            without pulling them in. Naming one never imports it.
-        envs: The environments this bundle is active in; ``None`` for all.
+            letter. ``KERNEL_BUNDLE`` is reserved.
+        config: The config type ``load_extension`` receives: a frozen
+            dataclass or msgspec Struct buildable with no arguments.
+            ``None`` means ``NoConfig``.
         resources: Modules or packages scanned like the application's.
 
     Raises:
@@ -53,13 +46,15 @@ def as_bundle(  # noqa: PLR0913 — mirrors every field of BundleMetadata.
     """
     if name in _RESERVED:
         raise BundleDefinitionError(name, "the name is reserved")
+    for index, resource in enumerate(resources):
+        if not isinstance(resource, str) or not resource:  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise BundleDefinitionError(
+                name, f"resources[{index}] must be a non-empty string, got {resource!r}"
+            )
     return declare_bundle(
         BundleMetadata(
             name=name,
             config=config if config is not None else NoConfig,
-            requires=tuple(requires),
-            optional=tuple(optional),
-            envs=tuple(envs) if envs is not None else None,
             resources=tuple(resources),
         )
     )
@@ -78,6 +73,7 @@ def declare_bundle(metadata: BundleMetadata) -> Callable[[B], B]:
         if not (isinstance(declared, type) and issubclass(declared, Bundle)):
             raise BundleDefinitionError(metadata.name, f"{cls!r} is not a Bundle subclass")
         _check_no_argument_constructor(metadata.name, cls)
+        _check_no_self_requirement(metadata.name, cls)
         setattr(cls, METADATA_ATTRIBUTE, metadata)
         return cls
 
@@ -95,6 +91,22 @@ def _check_config_default(bundle: str, config: type[object]) -> None:
     except Exception as error:
         failure = BundleDefinitionError(bundle, "its config type cannot be built with no arguments")
         raise failure from error
+
+
+def _check_no_self_requirement(bundle: str, cls: type[AnyBundle]) -> None:
+    """Refuse a ``@required_bundle`` declaration that targets the bundle itself.
+
+    A class target matching ``cls`` or a string target ``"module:ClassName"``
+    whose module + qualname match ``cls`` — checked before the resolver runs
+    so the failure names the class at import.
+    """
+    from .required_bundle import required_bundles_of  # noqa: PLC0415 — avoid an import cycle.
+
+    self_name = f"{cls.__module__}:{cls.__qualname__}"
+    for declaration in required_bundles_of(cls):
+        target = declaration.target
+        if target is cls or (isinstance(target, str) and target == self_name):
+            raise BundleDefinitionError(bundle, "a bundle cannot list itself as a required_bundle")
 
 
 def _check_no_argument_constructor(bundle: str, cls: type[object]) -> None:

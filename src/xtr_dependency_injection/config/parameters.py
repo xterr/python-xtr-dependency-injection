@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING, Final, TypeVar, cast
 
 from xtr_dependency_injection.decorator._marker import own_marker, set_marker
 from xtr_dependency_injection.exception import ConfigProviderError, ParameterConflictError
-
-from .config_provider import provider_name
+from xtr_dependency_injection.exception._naming import qualified_name
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -46,7 +45,7 @@ def call_parameters(fn: Callable[..., object]) -> Mapping[str, object]:
         ConfigProviderError: If it takes arguments or does not return a
             mapping.
     """
-    name = provider_name(fn)
+    name = qualified_name(fn)
     if inspect.signature(fn).parameters:
         raise ConfigProviderError(name, "a @parameters function takes no arguments")
     try:

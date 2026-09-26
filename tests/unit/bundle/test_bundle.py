@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-import wireup
 
 from xtr_dependency_injection.bundle import Bundle, BundleMetadata, NoConfig, as_bundle
 from xtr_dependency_injection.exception import BundleDefinitionError
@@ -29,10 +28,9 @@ def test_an_undecorated_subclass_has_no_metadata_of_its_own() -> None:
 
 async def test_boot_and_shutdown_do_nothing_by_default() -> None:
     bundle = SampleBundle()
-    container = wireup.create_async_container()
 
-    await bundle.boot(container)
-    await bundle.shutdown(container)
+    await bundle.boot()
+    await bundle.shutdown()
 
 
 def test_no_config_is_built_with_no_arguments() -> None:

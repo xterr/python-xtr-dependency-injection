@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from wireup import injectable
+from xtr_dependency_injection.decorator.as_service import as_service
 
 
-@injectable
+@as_service()
 class LateService:
     pass

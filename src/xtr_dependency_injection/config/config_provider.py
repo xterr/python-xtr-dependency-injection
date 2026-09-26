@@ -11,12 +11,12 @@ from typing import Final, Literal, cast
 from xtr_dependency_injection.bundle import NoConfig
 from xtr_dependency_injection.decorator.when import when_envs_of, when_not_envs_of
 from xtr_dependency_injection.exception import ConfigProviderError
+from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
 
 from .configure import configure_of
 
-__all__ = ["ConfigProvider", "config_provider_of", "provider_name"]
+__all__ = ["ConfigProvider", "config_provider_of"]
 
-_ANNOTATION_HINT: Final = "import annotation types at runtime, not under TYPE_CHECKING"
 _POSITIONAL: Final = frozenset(
     {inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD}
 )
@@ -67,11 +67,6 @@ class ConfigProvider:
         return produced
 
 
-def provider_name(fn: object) -> str:
-    """Return ``module:qualname`` for a function, as reports and errors name providers."""
-    return f"{getattr(fn, '__module__', '?')}:{getattr(fn, '__qualname__', repr(fn))}"
-
-
 def config_provider_of(fn: Callable[..., object]) -> ConfigProvider:
     """Read a ``@configure`` function into a :class:`ConfigProvider`.
 
@@ -83,7 +78,7 @@ def config_provider_of(fn: Callable[..., object]) -> ConfigProvider:
         NameError: If an annotation cannot be evaluated; the note names the
             provider.
     """
-    name = provider_name(fn)
+    name = qualified_name(fn)
     marker = configure_of(fn)
     if marker is None:
         raise ConfigProviderError(name, "it is not decorated with @configure")
@@ -108,7 +103,7 @@ def _hints(fn: Callable[..., object], name: str) -> dict[str, object]:
     try:
         return cast("dict[str, object]", typing.get_type_hints(fn, include_extras=True))
     except NameError as error:
-        error.add_note(f"while reading config provider {name}: {_ANNOTATION_HINT}")
+        error.add_note(f"while reading config provider {name}: {ANNOTATION_HINT}")
         raise
 
 

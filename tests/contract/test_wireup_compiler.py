@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Literal
+from typing import Annotated, Literal
 
 import pytest
 import wireup
@@ -17,7 +17,7 @@ from xtr_dependency_injection.compiler.wireup_compiler import (
     emission_order,
     emit_injectables,
 )
-from xtr_dependency_injection.decorator.as_decorator import Inner
+from xtr_dependency_injection.decorator.as_decorator import AutowireDecorated
 
 pytestmark = pytest.mark.anyio
 
@@ -50,7 +50,7 @@ class Buffer:
 
 
 class Loud(Plugin):
-    def __init__(self, inner: Inner[Plugin]) -> None:
+    def __init__(self, inner: Annotated[Plugin, AutowireDecorated()]) -> None:
         self.inner: Plugin = inner
 
     @override
@@ -67,11 +67,6 @@ class NeedsMissing:
         self.missing: Missing = missing
 
 
-@wireup.injectable
-class Declared:
-    pass
-
-
 def third() -> Third:
     return Third()
 
@@ -80,7 +75,7 @@ def buffer_resource() -> Iterator[Buffer]:
     yield Buffer()
 
 
-Kind = Literal["class", "factory", "instance", "declared"]
+Kind = Literal["class", "factory", "instance"]
 
 
 def _definition(  # noqa: PLR0913 — mirrors Definition's fields.
@@ -109,18 +104,16 @@ def _compile(
     )
 
 
-def test_emission_order_is_kernel_bundles_then_app_by_priority() -> None:
+def test_emission_order_is_priority_desc_then_definition_order() -> None:
     app = _definition(Plugin, First, APP, qualifier="app")
     beta = _definition(Plugin, Second, BETA, qualifier="beta")
     alpha_low = _definition(Plugin, Third, ALPHA, qualifier="alpha_low")
     alpha_high = _definition(Plugin, Third, ALPHA, qualifier="alpha_high", priority=5)
     kernel = _definition(Plugin, First, KERNEL, qualifier="kernel")
 
-    ordered = emission_order(
-        [app, beta, alpha_low, alpha_high, kernel], ["kernel", "alpha", "beta"]
-    )
+    ordered = emission_order([app, beta, alpha_low, alpha_high, kernel])
 
-    assert [d.key[1] for d in ordered] == ["kernel", "alpha_high", "alpha_low", "beta", "app"]
+    assert [d.key[1] for d in ordered] == ["alpha_high", "app", "beta", "alpha_low", "kernel"]
 
 
 async def test_the_emitted_order_is_the_collection_order() -> None:
@@ -139,20 +132,18 @@ async def test_every_kind_is_resolvable() -> None:
     container = _compile(
         _definition(Plugin, First, qualifier="class"),
         _definition(Buffer, instance, kind="instance"),
-        _definition(Declared, Declared, kind="declared"),
         _definition(Third, third, kind="factory"),
     )
 
     assert isinstance(await container.get(Plugin, "class"), First)
     assert await container.get(Buffer) is instance
-    assert isinstance(await container.get(Declared), Declared)
     assert isinstance(await container.get(Third), Third)
 
 
 async def test_a_resettable_service_is_tracked_once_built() -> None:
     tracked: list[tuple[object, str]] = []
-    definition = Definition(
-        (Buffer, None), buffer_resource, "factory", "singleton", ALPHA, reset_method="reset"
+    definition = Definition((Buffer, None), buffer_resource, "factory", "singleton", ALPHA).add_tag(
+        "kernel.reset", method="reset"
     )
     container = _compile(definition, tracked=tracked)
     assert tracked == []
@@ -183,9 +174,12 @@ async def test_stacked_decorations_wrap_in_order() -> None:
 
 
 def test_a_wireup_error_is_annotated_with_origins() -> None:
-    with pytest.raises(WireupError) as caught:
+    from xtr_dependency_injection.exception import ContainerCompilationError  # noqa: PLC0415
+
+    with pytest.raises(ContainerCompilationError) as caught:
         _ = _compile(_definition(NeedsMissing, NeedsMissing, BETA))
 
+    assert isinstance(caught.value.__cause__, WireupError)
     assert any("is defined by bundle beta" in note for note in caught.value.__notes__)
 
 
@@ -195,3 +189,56 @@ async def test_parameters_reach_the_container() -> None:
     )
 
     assert container.config.get("kernel.environment") == "dev"
+
+
+async def test_a_decorated_instance_builds_and_behaves() -> None:
+    instance = First()
+    container = _compile(
+        _definition(Plugin, instance, kind="instance"),
+        decorations={(Plugin, None): [Decoration(Loud, "inner", "tests:Loud")]},
+    )
+
+    plugin = await container.get(Plugin)
+
+    assert plugin.name() == "Loud(First)"
+
+
+async def test_a_reset_tagged_instance_is_tracked_once_built() -> None:
+    tracked: list[tuple[object, str]] = []
+    instance = Buffer()
+    definition = Definition((Buffer, None), instance, "instance", "singleton", ALPHA).add_tag(
+        "kernel.reset", method="reset"
+    )
+    container = _compile(definition, tracked=tracked)
+
+    built = await container.get(Buffer)
+
+    assert built is instance
+    assert tracked == [(built, "reset")]
+
+
+class Mailer:
+    pass
+
+
+class MailerFactory:
+    pass
+
+
+class NeedsMailerFactory:
+    def __init__(self, factory: MailerFactory) -> None:
+        self.factory: MailerFactory = factory
+
+
+def test_a_note_matches_type_names_by_word_boundary() -> None:
+    from xtr_dependency_injection.exception import ContainerCompilationError  # noqa: PLC0415
+
+    # NeedsMailerFactory needs MailerFactory (unregistered); the message names
+    # "MailerFactory". A substring match would also note the unrelated `Mailer`
+    # definition — `\bMailer\b` in "MailerFactory" is what we prove absent.
+    mailer_def = _definition(Mailer, Mailer, BETA)
+    with pytest.raises(ContainerCompilationError) as caught:
+        _ = _compile(mailer_def, _definition(NeedsMailerFactory, NeedsMailerFactory, BETA))
+
+    notes = caught.value.__notes__
+    assert not any("tests:Mailer is defined" in note for note in notes), notes

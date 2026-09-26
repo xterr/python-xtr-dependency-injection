@@ -1,108 +1,72 @@
 """The one place that reaches past wireup's public API.
 
-wireup exposes no way to read what ``@injectable`` recorded on an object, nor
-the rule it keys a factory by. The kernel needs both: the first to adopt what
-an application marked, the second to know the key a factory will be
-registered under before wireup ever sees it. Everything that depends on
-wireup's internals lives here, so a wireup release that moves them breaks one
-module — and ``tests/contract`` says which behaviour moved.
+wireup exposes no way to answer "is this type known" without side effects, nor
+the rule it keys a factory by. The kernel needs both: the second to know the
+key a factory will be registered under before wireup ever sees it, the first
+to answer container queries without trying to build. Everything that depends
+on wireup's internals lives here, so a wireup release that moves them breaks
+one module — and ``tests/contract`` says which behaviour moved.
+
+``REGISTRATION_ATTRIBUTE`` names the dunder ``@injectable`` writes on what it
+decorates; the bridge exports the name so ``_clone_function`` can strip it
+when copying a factory, keeping the mark out of the clone.
 """
 
 from __future__ import annotations
 
-import inspect
-from collections.abc import Hashable
-from dataclasses import dataclass
-from types import FunctionType
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast, get_args, get_origin
 
+import wireup
 from wireup.errors import FactoryReturnTypeIsEmptyError
 from wireup.ioc.registry import _function_get_unwrapped_return_type
 from wireup.ioc.type_analysis import analyze_type
 
+from xtr_dependency_injection.decorator.autowire import Autowire, Target
+
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    import inspect
+    from collections.abc import Callable, Hashable
+
+    from wireup import AsyncContainer
+
+    from xtr_dependency_injection.builder.definition import Definition
 
 __all__ = [
     "REGISTRATION_ATTRIBUTE",
-    "declaration_of",
+    "built_type",
+    "is_registered",
     "key_type",
-    "provided_type",
-    "unwrapped_return_type",
+    "to_engine_signature",
 ]
 
 REGISTRATION_ATTRIBUTE = "__wireup_registration__"
 """Where ``@injectable`` records its declaration on what it marks."""
 
 
-@dataclass(frozen=True, slots=True)
-class _Declaration:
-    """What ``@injectable`` recorded on an object, read into a stable shape."""
+def is_registered(container: AsyncContainer, service: type, qualifier: Hashable | None) -> bool:
+    """Return whether ``container`` has a service registered for ``(service, qualifier)``.
 
-    obj: object
-    qualifier: Hashable | None
-    lifetime: Literal["singleton", "scoped", "transient"]
-    as_type: type | None
-
-
-def declaration_of(obj: object) -> _Declaration | None:
-    """Return what ``@injectable`` recorded on ``obj``, or ``None``.
-
-    Only functions and classes are asked, as wireup's own discovery does: a
-    proxy object may answer ``hasattr`` with side effects. A registration is
-    only ``obj``'s own when it points back at ``obj``: a subclass of a marked
-    class inherits the attribute, and must not be mistaken for a second
-    declaration of its parent. The deprecated ``@abstract`` marker records no
-    lifetime and is not a declaration.
+    wireup exposes no public predicate for "is this type known"; ``container.get``
+    only answers by trying to build. This is the one place that reaches into
+    wireup's registry to answer without side effects.
     """
-    if not (isinstance(obj, FunctionType) or inspect.isclass(obj)):
-        return None
-    registration = cast("object", getattr(obj, REGISTRATION_ATTRIBUTE, None))
-    if registration is None or getattr(registration, "obj", None) is not obj:
-        return None
-    if not hasattr(registration, "lifetime"):
-        return None
-    return _Declaration(
-        obj=obj,
-        qualifier=cast("Hashable | None", getattr(registration, "qualifier", None)),
-        lifetime=cast(
-            "Literal['singleton', 'scoped', 'transient']", getattr(registration, "lifetime", None)
-        ),
-        as_type=cast("type | None", getattr(registration, "as_type", None)),
-    )
-
-
-def unwrapped_return_type(provider: Callable[..., object] | type) -> object | None:
-    """Return the type wireup would register ``provider`` under, or ``None``.
-
-    A class is itself; a function is its return annotation, evaluated against
-    its module; a generator function is the type it yields.
-    """
-    return cast("object | None", _function_get_unwrapped_return_type(provider))
-
-
-def provided_type(declaration: _Declaration) -> type:
-    """Return the key type wireup registers ``declaration`` under.
-
-    That is ``as_type`` when given, else the class or the factory's return
-    type — normalized the way wireup normalizes it, so ``Annotated`` wrappers
-    are stripped and an optional return stays ``T | None``.
-
-    Raises:
-        FactoryReturnTypeIsEmptyError: If the declared function has no
-            return annotation.
-    """
-    return key_type(cast("Callable[..., object] | type", declaration.obj), declaration.as_type)
+    return container._registry.is_type_with_qualifier_known(service, qualifier)  # noqa: SLF001
 
 
 def key_type(provider: Callable[..., object] | type, as_type: type | None) -> type:
     """Return the key type wireup would register ``provider`` under, given ``as_type``.
 
+    The implementation type is what wireup registers ``provider`` under: a
+    class is itself, a function is its return annotation evaluated against its
+    module, a generator function is the type it yields. It is then normalized
+    the way wireup normalizes it, so ``Annotated`` wrappers are stripped and an
+    optional return stays ``T | None``.
+
     Raises:
         FactoryReturnTypeIsEmptyError: If ``provider`` is a function without a
             return annotation.
     """
-    implementation = unwrapped_return_type(provider)
+    implementation = cast("object | None", _function_get_unwrapped_return_type(provider))
     if implementation is None:
         raise FactoryReturnTypeIsEmptyError(provider)
     analysis = analyze_type(implementation)
@@ -112,3 +76,84 @@ def key_type(provider: Callable[..., object] | type, as_type: type | None) -> ty
     if analysis.is_optional:
         target = as_type | None
     return analyze_type(target).normalized_type
+
+
+def to_engine_signature(signature: inspect.Signature) -> inspect.Signature:
+    """Return ``signature`` with our ``Autowire``/``Target`` markers rewritten to wireup's.
+
+    A parameter annotated ``Annotated[T, Autowire()]`` becomes
+    ``Annotated[T, wireup.Inject()]``, ``Autowire(param=p)`` becomes
+    ``wireup.Inject(config=p)``, and ``Target(n)`` becomes
+    ``wireup.Inject(qualifier=n)``. Any other metadata (including a
+    ``wireup.Inject`` a user wrote directly) is left untouched, so a user
+    reaching for the engine still works — see the interop tests.
+
+    A signature without any of our markers is returned unchanged, so this
+    helper is safe to apply on every callable presented to wireup.
+    """
+    parameters = list(signature.parameters.values())
+    changed = False
+    for index, parameter in enumerate(parameters):
+        rewritten = _rewrite_annotation(cast("object", parameter.annotation))
+        if rewritten is not None:
+            parameters[index] = parameter.replace(annotation=rewritten)
+            changed = True
+    if not changed:
+        return signature
+    return signature.replace(parameters=parameters)
+
+
+def _rewrite_annotation(annotation: object) -> object | None:
+    """Return a rewritten ``Annotated[...]`` or ``None`` when nothing changed."""
+    if get_origin(annotation) is not Annotated:
+        return None
+    wrapped, *metadata = cast("tuple[object, ...]", get_args(annotation))
+    new_metadata: list[object] = []
+    changed = False
+    for entry in metadata:
+        translated = _translate(entry)
+        if translated is entry:
+            new_metadata.append(entry)
+        else:
+            new_metadata.append(translated)
+            changed = True
+    if not changed:
+        return None
+    annotated: Any = Annotated
+    return cast("object", annotated[(wrapped, *new_metadata)])
+
+
+def _translate(entry: object) -> object:
+    """Translate one of our markers to wireup's; return ``entry`` unchanged otherwise."""
+    if isinstance(entry, Autowire):
+        return wireup.Inject(config=entry.param) if entry.param is not None else wireup.Inject()
+    if isinstance(entry, Target):
+        return wireup.Inject(qualifier=entry.name)
+    return entry
+
+
+def built_type(definition: Definition) -> type | None:
+    """Return the concrete type ``definition``'s provider builds, or ``None`` when unknown.
+
+    - ``class``: the provider itself.
+    - ``instance``: ``type(provider)``.
+    - ``factory``: ``key_type(provider, None)``, or ``None`` when the factory
+      has no return annotation (Symfony ``AutoconfigureTag`` skips those).
+
+    A parameterized generic (``ServiceLocator[T]``) is unwrapped to its origin
+    class so ``__mro__`` walks succeed.
+    """
+    kind = definition.kind
+    provider = definition.provider
+    if kind == "class":
+        return cast("type", provider)
+    if kind == "instance":
+        return type(provider)
+    try:
+        key = key_type(cast("Callable[..., object]", provider), None)
+    except FactoryReturnTypeIsEmptyError:
+        return None
+    origin = get_origin(key)
+    if isinstance(origin, type):
+        return origin
+    return key

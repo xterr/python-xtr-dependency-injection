@@ -17,7 +17,7 @@ def test_an_origin_note_is_shown_in_parentheses() -> None:
     assert str(origin) == "bundle console (via autoconfigure of app.x:Y)"
 
 
-def test_a_definition_defaults_to_no_priority_and_no_reset() -> None:
+def test_a_definition_defaults_to_no_priority_and_no_decoration() -> None:
     definition = Definition(
         key=(Sample, None),
         provider=Sample,
@@ -26,4 +26,6 @@ def test_a_definition_defaults_to_no_priority_and_no_reset() -> None:
         origin=Origin("app", "tests:Sample"),
     )
 
-    assert (definition.priority, definition.reset_method) == (0, None)
+    assert definition.priority is None
+    assert (definition.tags, definition.decorates) == ({}, None)
+    assert (definition.before, definition.after) == ((), ())

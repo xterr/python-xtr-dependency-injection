@@ -7,12 +7,13 @@ origins instead of a bare duplicate:
   report records the override (Symfony's parity);
 - bundle against bundle: an error, unless it goes through
   ``builder.replace``;
-- application against application: an error.
+- application against application: an error;
+- application against the kernel: an error — kernel services are not
+  app-overridable.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, final
 
 from xtr_dependency_injection.exception import DuplicateServiceError
@@ -20,7 +21,37 @@ from xtr_dependency_injection.exception import DuplicateServiceError
 if TYPE_CHECKING:
     from .definition import Definition, Origin, ServiceKey
 
-__all__ = ["DefinitionStore"]
+__all__ = ["DefinitionStore", "record_alias"]
+
+
+def record_alias(
+    aliases: dict[ServiceKey, ServiceKey],
+    alias_origins: dict[ServiceKey, Origin],
+    alias_key: ServiceKey,
+    target_key: ServiceKey,
+    origin: Origin,
+) -> None:
+    """Set the alias ``alias_key -> target_key``, applying the definition conflict policy.
+
+    Same rules as :meth:`DefinitionStore.add`: app over bundle (silently),
+    bundle vs bundle, app vs app and app vs kernel all raise
+    :class:`DuplicateServiceError`.
+
+    Raises:
+        DuplicateServiceError: If neither alias may override the other.
+    """
+    existing = alias_origins.get(alias_key)
+    if existing is None:
+        aliases[alias_key] = target_key
+        alias_origins[alias_key] = origin
+        return
+    if origin.kind == "app" and existing.kind == "bundle":
+        aliases[alias_key] = target_key
+        alias_origins[alias_key] = origin
+        return
+    if existing.kind == "app" and origin.kind == "bundle":
+        return
+    raise DuplicateServiceError(alias_key, existing, origin)
 
 
 @final
@@ -48,23 +79,19 @@ class DefinitionStore:
         if existing is None:
             self._insert(definition)
             return
-        if definition.origin.kind == "app" and existing.origin.kind != "app":
+        if definition.origin.kind == "app" and existing.origin.kind == "bundle":
             self._overrides.setdefault(key, []).append(existing.origin)
             self._insert(definition)
-        elif existing.origin.kind == "app" and definition.origin.kind != "app":
+        elif existing.origin.kind == "app" and definition.origin.kind == "bundle":
             self._overrides.setdefault(key, []).append(definition.origin)
         else:
             raise DuplicateServiceError(key, existing.origin, definition.origin)
 
-    def replace(self, definition: Definition) -> None:
+    def overwrite(self, definition: Definition) -> None:
         """Replace the definition of ``definition.key`` on purpose, keeping its position."""
         existing = self._definitions[definition.key]
         self._overrides.setdefault(definition.key, []).append(existing.origin)
         self._definitions[definition.key] = definition
-
-    def update(self, key: ServiceKey, **changes: object) -> None:
-        """Change fields of the definition of ``key`` without it counting as an override."""
-        self._definitions[key] = replace(self._definitions[key], **changes)
 
     def remove(self, key: ServiceKey) -> None:
         """Forget the definition of ``key``."""
@@ -75,11 +102,7 @@ class DefinitionStore:
         """Return the definition of ``key``, or ``None``."""
         return self._definitions.get(key)
 
-    def has_provider(self, provider: object) -> bool:
-        """Return whether any definition is provided by this very object."""
-        return any(definition.provider is provider for definition in self._definitions.values())
-
-    def definitions(self) -> tuple[Definition, ...]:
+    def entries(self) -> tuple[Definition, ...]:
         """Return every definition, in declaration order."""
         ordered = sorted(self._definitions.values(), key=lambda d: self._sequence[d.key])
         return tuple(ordered)

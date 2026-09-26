@@ -16,13 +16,19 @@ PUBLIC_WIREUP = {"wireup", "wireup.errors"}
 # leaf every layer may raise from.
 ALLOWED: dict[str, set[str]] = {
     "exception": set(),
-    "decorator": {"exception", "diagnostics"},
+    "decorator": {
+        "exception",
+        "diagnostics",
+        "builder.definition",
+        "builder.on_invalid",
+        "builder.pass_stage",
+    },
     "bundle": {"exception", "diagnostics"},
-    "runtime": {"exception", "builder.definition"},
-    "compiler": {"exception"},
+    "runtime": {"exception", "builder.definition", "compiler._wireup_bridge"},
+    "compiler": {"exception", "decorator.autowire"},
     "diagnostics": {"exception", "builder.definition"},
 }
-ABOVE_EVERYTHING = {"kernel", "standalone", "testing"}
+ABOVE_EVERYTHING = {"integration", "kernel", "testing"}
 
 
 def _modules() -> list[tuple[str, Path]]:

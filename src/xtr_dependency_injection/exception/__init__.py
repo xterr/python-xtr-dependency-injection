@@ -12,6 +12,7 @@ from .bundle_definition_error import BundleDefinitionError
 from .circular_bundle_dependency_error import CircularBundleDependencyError
 from .config_provider_error import ConfigProviderError
 from .conflicting_config_providers_error import ConflictingConfigProvidersError
+from .container_compilation_error import ContainerCompilationError
 from .decorator_signature_error import DecoratorSignatureError
 from .dependency_injection_error import DependencyInjectionError
 from .duplicate_bundle_error import DuplicateBundleError
@@ -22,7 +23,11 @@ from .kernel_already_booted_error import KernelAlreadyBootedError
 from .missing_bundle_error import MissingBundleError
 from .missing_environment_variable_error import MissingEnvironmentVariableError
 from .parameter_conflict_error import ParameterConflictError
+from .parameter_not_found_error import ParameterNotFoundError
 from .resource_import_error import ResourceImportError
+from .service_not_found_error import ServiceNotFoundError
+from .service_order_error import ServiceOrderError
+from .service_resolution_error import ServiceResolutionError
 from .unknown_config_type_error import UnknownConfigTypeError
 from .unknown_locator_key_error import UnknownLocatorKeyError
 from .unknown_service_error import UnknownServiceError
@@ -34,6 +39,7 @@ __all__ = [
     "CircularBundleDependencyError",
     "ConfigProviderError",
     "ConflictingConfigProvidersError",
+    "ContainerCompilationError",
     "DecoratorSignatureError",
     "DependencyInjectionError",
     "DuplicateBundleError",
@@ -44,7 +50,11 @@ __all__ = [
     "MissingBundleError",
     "MissingEnvironmentVariableError",
     "ParameterConflictError",
+    "ParameterNotFoundError",
     "ResourceImportError",
+    "ServiceNotFoundError",
+    "ServiceOrderError",
+    "ServiceResolutionError",
     "UnknownConfigTypeError",
     "UnknownLocatorKeyError",
     "UnknownServiceError",

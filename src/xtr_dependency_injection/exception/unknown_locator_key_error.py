@@ -12,7 +12,7 @@ from .dependency_injection_error import DependencyInjectionError
 __all__ = ["UnknownLocatorKeyError"]
 
 
-class UnknownLocatorKeyError(DependencyInjectionError):
+class UnknownLocatorKeyError(DependencyInjectionError, LookupError):
     """A service locator was asked for a key it does not hold."""
 
     key: Hashable

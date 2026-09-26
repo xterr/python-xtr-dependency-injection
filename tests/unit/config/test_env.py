@@ -62,3 +62,20 @@ def test_bool_refuses_anything_else(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(InvalidEnvironmentVariableError):
         _ = env("XTR_TEST_FLAG", bool)
+
+
+def test_string_default_yields_a_str_or_none_typed_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The typed assignment below is what basedpyright validates for todo 24."""
+    monkeypatch.delenv("XTR_TEST_MISSING", raising=False)
+
+    value: str | None = env("XTR_TEST_MISSING", default=None)
+
+    assert value is None
+
+
+def test_cast_default_yields_a_typed_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XTR_TEST_MISSING", raising=False)
+
+    value: int | None = env("XTR_TEST_MISSING", int, default=None)
+
+    assert value is None

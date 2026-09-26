@@ -16,26 +16,27 @@ from __future__ import annotations
 import inspect
 import types
 from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Annotated, Any, Final, cast
 
-from ._wireup_bridge import REGISTRATION_ATTRIBUTE
+from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+
+from ._wireup_bridge import REGISTRATION_ATTRIBUTE, to_engine_signature
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
 __all__ = [
+    "_alias_factory",
     "_box_type",
     "_clone_function",
     "_decorating_factory",
-    "_factory_of",
-    "_instance_factory",
     "_map_result",
+    "_null_decorator_factory",
     "_synthesize_class_factory",
 ]
 
 _BOX_MODULE: Final = "xtr_dependency_injection.compiler"
 _INNER_BOX_PARAMETER: Final = "_xtr_inner_box"
-_ANNOTATION_HINT: Final = "import annotation types at runtime, not under TYPE_CHECKING"
 
 
 def _clone_function(fn: Callable[..., object]) -> types.FunctionType:
@@ -64,6 +65,8 @@ def _clone_function(fn: Callable[..., object]) -> types.FunctionType:
     if type_params:
         # PEP 695 (3.12+); absent from the 3.11 stubs this package is checked against.
         _set(clone, __type_params__=type_params)
+    # Rewrite our Autowire/Target markers to wireup's before the engine reads the clone.
+    _set(clone, __signature__=to_engine_signature(_evaluated_signature(clone)))
     return clone
 
 
@@ -81,8 +84,9 @@ def _evaluated_signature(target: Callable[..., object] | type) -> inspect.Signat
     try:
         return inspect.signature(target, eval_str=True)
     except NameError as error:
-        name = getattr(target, "__qualname__", repr(target))
-        error.add_note(f"while reading the signature of {name}: {_ANNOTATION_HINT}")
+        error.add_note(
+            f"while reading the signature of {qualified_name(target)}: {ANNOTATION_HINT}"
+        )
         raise
 
 
@@ -99,7 +103,7 @@ def _synthesize_class_factory(cls: type) -> Callable[..., object]:
 
     _set(
         build,
-        __signature__=_evaluated_signature(cls).replace(return_annotation=cls),
+        __signature__=to_engine_signature(_evaluated_signature(cls)).replace(return_annotation=cls),
         __annotations__={"return": cls},
         __module__=cls.__module__,
         __qualname__=cls.__qualname__,
@@ -108,25 +112,37 @@ def _synthesize_class_factory(cls: type) -> Callable[..., object]:
     return build
 
 
-def _factory_of(provider: Callable[..., object] | type) -> Callable[..., object]:
-    """Return an unmarked factory for ``provider``: a synthesized one for a class, a clone else."""
-    if isinstance(provider, type):
-        return _synthesize_class_factory(provider)
-    return _clone_function(provider)
+def _alias_factory(
+    alias_type: type,
+    target_type: type,
+    target_qualifier: object | None,
+) -> Callable[..., object]:
+    """Return a factory forwarding ``(target_type, target_qualifier)`` under ``alias_type``.
 
+    Symfony's ``setAlias`` (14f in the plan): the alias shares the target's
+    instance. The synthesized factory takes the target as an injected
+    parameter and hands it back, so wireup resolves the alias through the
+    target definition without duplicating state.
+    """
+    import wireup  # noqa: PLC0415 — only compiler code may reach wireup.
 
-def _instance_factory(obj: object) -> Callable[..., object]:
-    """Return a zero-argument factory handing out ``obj``."""
+    annotated: Any = Annotated
+    annotation = cast("type", annotated[target_type, wireup.Inject(qualifier=target_qualifier)])
+    parameter = inspect.Parameter("target", inspect.Parameter.KEYWORD_ONLY, annotation=annotation)
+    signature = inspect.Signature(parameters=[parameter], return_annotation=alias_type)
 
-    def provide() -> object:
-        return obj
+    def forward(**kwargs: object) -> object:
+        return kwargs["target"]
 
     _set(
-        provide,
-        __annotations__={"return": type(obj)},
-        __signature__=inspect.Signature(return_annotation=type(obj)),
+        forward,
+        __signature__=signature,
+        __annotations__={"target": annotation, "return": alias_type},
+        __module__=_BOX_MODULE,
+        __qualname__=f"_alias_forward_{alias_type.__name__}",
+        __name__=f"_alias_forward_{alias_type.__name__}",
     )
-    return provide
+    return forward
 
 
 def _map_result(
@@ -172,6 +188,39 @@ def _box_type(index: int) -> type:
     # What typing.final records at runtime; the box is never subclassed.
     _set(box, __qualname__=box.__name__, __final__=True)
     return box
+
+
+def _null_decorator_factory(
+    decorator: Callable[..., object] | type,
+    inner_parameter: str,
+    provides: type,
+) -> Callable[..., object]:
+    """Return a factory of ``decorator``'s kind with ``inner_parameter`` pre-filled with ``None``.
+
+    Used by the OPTIMIZE pass when a decorator declares
+    ``on_invalid=OnInvalid.NULL`` and the decorated service is not defined:
+    the decorator is registered under the missing target's key, and this
+    wrapper strips its ``AutowireDecorated`` parameter from the signature
+    presented to wireup while feeding ``None`` at call time.
+    """
+    base_factory = (
+        _synthesize_class_factory(decorator)
+        if isinstance(decorator, type)
+        else _clone_function(decorator)
+    )
+    signature = _evaluated_signature(base_factory)
+    if inner_parameter not in signature.parameters:
+        msg = f"cannot fill parameter {inner_parameter!r} of {decorator!r} with None"
+        raise ValueError(msg)
+    parameters = [p for p in signature.parameters.values() if p.name != inner_parameter]
+
+    def fill_none(kwargs: dict[str, object]) -> dict[str, object]:
+        kwargs[inner_parameter] = None
+        return kwargs
+
+    return _wrap(
+        base_factory, signature.replace(parameters=parameters), provides, fill_none, _identity
+    )
 
 
 def _decorating_factory(
@@ -242,7 +291,7 @@ def _wrap(
 
     _set(
         wrapper,
-        __signature__=signature.replace(return_annotation=annotation),
+        __signature__=to_engine_signature(signature).replace(return_annotation=annotation),
         __annotations__={"return": annotation},
         __module__=factory.__module__,
         __qualname__=getattr(factory, "__qualname__", repr(factory)),

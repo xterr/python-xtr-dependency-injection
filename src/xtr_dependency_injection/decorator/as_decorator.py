@@ -1,77 +1,115 @@
-"""Wrapping a service with another that takes its place: ``@as_decorator`` and ``Inner[T]``.
+"""Decoration: ``@as_decorator`` records a target, ``AutowireDecorated`` marks the inner parameter.
 
 The decorator is registered under the decorated service's key, so everything
-asking for that service — and every ``Sequence[T]`` holding it — gets the
-decorator. The decorator receives the original through its one ``Inner[T]``
-parameter::
+asking for that service - and every ``Sequence[T]`` holding it - gets the
+decorator. The decorator receives the original through its one parameter
+annotated ``Annotated[T, AutowireDecorated()]``, mirroring Symfony's
+``#[AutowireDecorated]``::
 
     @as_decorator(MessageBusInterface)
     class TracingBus:
-        def __init__(self, inner: Inner[MessageBusInterface], tracer: Tracer) -> None: ...
+        def __init__(
+            self,
+            inner: Annotated[MessageBusInterface, AutowireDecorated()],
+            tracer: Tracer,
+        ) -> None: ...
+
+When the decorated service is missing, the ``on_invalid`` option decides:
+``OnInvalid.EXCEPTION`` (the default, Symfony's
+``ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE``) fails the build;
+``OnInvalid.IGNORE`` drops the decorator; ``OnInvalid.NULL`` keeps the
+decorator under the missing target's key with ``None`` for its
+``AutowireDecorated`` parameter (which must then allow ``None``).
 """
 
 from __future__ import annotations
 
 import inspect
+import types
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Final, TypeAlias, TypeVar, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Final, TypeVar, cast, get_args, get_origin
 
+from xtr_dependency_injection.builder.on_invalid import OnInvalid
 from xtr_dependency_injection.exception import DecoratorSignatureError
+from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
 
 from ._marker import own_marker, set_marker
+
+_UNION_ORIGINS: Final = frozenset({get_origin(int | type(None)), types.UnionType})
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 __all__ = [
+    "AutowireDecorated",
+    "DecoratedParameter",
     "DecoratorMarker",
-    "Inner",
-    "InnerMarker",
+    "OnInvalid",
     "as_decorator",
+    "decorated_parameter_of",
     "decorator_of",
-    "inner_parameter_of",
-    "inner_type_of",
 ]
 
-T = TypeVar("T")
 D = TypeVar("D", bound="Callable[..., object]")
 
 _DECORATOR: Final = "__xtr_decorator__"
 
 
 @dataclass(frozen=True, slots=True)
-class InnerMarker:
-    """Marks the parameter of a decorator that receives the decorated service."""
+class AutowireDecorated:
+    """Marks the parameter of a decorator that receives the decorated service.
 
-
-Inner: TypeAlias = Annotated[T, InnerMarker()]
-"""The decorated service, as a decorator's parameter: ``inner: Inner[MessageBusInterface]``."""
+    Symfony's ``#[AutowireDecorated]``: applied through
+    ``Annotated[T, AutowireDecorated()]`` to the parameter that receives the
+    service the decorator wraps.
+    """
 
 
 @dataclass(frozen=True, slots=True)
 class DecoratorMarker:
-    """What ``@as_decorator`` records: the service decorated, and the decoration's order."""
+    """What ``@as_decorator`` records on a class or factory function.
+
+    Attributes:
+        target: The type of the decorated service.
+        qualifier: The qualifier of the decorated service, or ``None``.
+        priority: Order among decorators of the same target - highest first.
+        on_invalid: Behavior when the target is not defined.
+    """
 
     target: type
     qualifier: Hashable | None = None
     priority: int = 0
+    on_invalid: OnInvalid = OnInvalid.EXCEPTION
 
 
 def as_decorator(
-    target: type, /, *, qualifier: Hashable | None = None, priority: int = 0
+    target: type,
+    /,
+    *,
+    qualifier: Hashable | None = None,
+    priority: int = 0,
+    on_invalid: OnInvalid = OnInvalid.EXCEPTION,
 ) -> Callable[[D], D]:
-    """Decorate the service ``(target, qualifier)`` with the decorated class or factory.
+    """Register the decorated class or factory as a decorator of ``(target, qualifier)``.
 
     Decorations of one service apply by ``priority``, highest first: the
     highest wraps the original, and each next one wraps the previous result.
-    The decorator gets the decorated service's lifetime.
+    The decorator inherits the decorated service's lifetime and lives only
+    under the target's key.
+
+    Named after Symfony's ``#[AsDecorator]`` attribute; ``on_invalid`` maps to
+    Symfony's ``AsDecorator::$onInvalid``.
     """
 
-    def decorate(decorator: D) -> D:
-        return set_marker(decorator, _DECORATOR, DecoratorMarker(target, qualifier, priority))
+    def record(target_obj: D) -> D:
+        return set_marker(
+            target_obj,
+            _DECORATOR,
+            DecoratorMarker(target, qualifier, priority, on_invalid),
+        )
 
-    return decorate
+    return record
 
 
 def decorator_of(obj: object) -> DecoratorMarker | None:
@@ -79,38 +117,81 @@ def decorator_of(obj: object) -> DecoratorMarker | None:
     return cast("DecoratorMarker | None", own_marker(obj, _DECORATOR))
 
 
-def inner_type_of(annotation: object) -> object | None:
-    """Return ``T`` when ``annotation`` is ``Inner[T]``, else ``None``."""
-    if get_origin(annotation) is not Annotated:
-        return None
-    wrapped, *metadata = cast("tuple[object, ...]", get_args(annotation))
-    return wrapped if any(isinstance(entry, InnerMarker) for entry in metadata) else None
+@dataclass(frozen=True, slots=True)
+class DecoratedParameter:
+    """The parameter of a decorator that receives the decorated service.
+
+    Attributes:
+        name: The parameter name.
+        allows_none: Whether its annotation is ``T | None`` -
+            :attr:`OnInvalid.NULL` needs it to be true.
+    """
+
+    name: str
+    allows_none: bool
 
 
-def inner_parameter_of(decorator: object, target: object) -> str:
-    """Return the name of ``decorator``'s one ``Inner[target]`` parameter.
+def decorated_parameter_of(decorator: object, target: object) -> DecoratedParameter:
+    """Return which parameter of ``decorator`` carries ``Annotated[target, AutowireDecorated()]``.
+
+    ``target`` may equally match ``target | None`` (``Optional[target]``);
+    :attr:`DecoratedParameter.allows_none` reports which case was found. The
+    ``OnInvalid.NULL`` code path requires it to be true.
 
     Raises:
-        DecoratorSignatureError: If it has none, several, or one of another
-            type than ``target``.
+        DecoratorSignatureError: If ``decorator`` has none, several, or one
+            parameter annotated for another type than ``target``.
     """
-    name = f"{getattr(decorator, '__module__', '?')}:{getattr(decorator, '__qualname__', '?')}"
-    hint = "import annotation types at runtime, not under TYPE_CHECKING"
+    name = qualified_name(decorator)
     try:
         signature = inspect.signature(cast("Callable[..., object]", decorator), eval_str=True)
     except NameError as error:
-        error.add_note(f"while reading decorator {name}: {hint}")
+        error.add_note(f"while reading decorator {name}: {ANNOTATION_HINT}")
         raise
-    inner = [
-        (parameter.name, inner_type_of(cast("object", parameter.annotation)))
-        for parameter in signature.parameters.values()
-    ]
-    found = [(parameter, inner_type) for parameter, inner_type in inner if inner_type is not None]
+    found: list[tuple[str, object, bool]] = []
+    for parameter in signature.parameters.values():
+        typed = _autowire_decorated_type(cast("object", parameter.annotation))
+        if typed is not None:
+            inner_type, allows_none = typed
+            found.append((parameter.name, inner_type, allows_none))
     if len(found) != 1:
-        reason = f"it must have exactly one Inner[...] parameter, not {len(found)}"
+        reason = (
+            f"it must have exactly one Annotated[..., AutowireDecorated()] "
+            f"parameter, not {len(found)}"
+        )
         raise DecoratorSignatureError(name, reason)
-    ((parameter, inner_type),) = found
+    parameter_name, inner_type, allows_none = found[0]
     if inner_type is not target:
-        reason = f"its Inner[...] parameter {parameter!r} must be of the decorated type"
+        reason = (
+            f"its Annotated[..., AutowireDecorated()] parameter {parameter_name!r} "
+            f"must be of the decorated type"
+        )
         raise DecoratorSignatureError(name, reason)
-    return parameter
+    return DecoratedParameter(name=parameter_name, allows_none=allows_none)
+
+
+def _autowire_decorated_type(annotation: object) -> tuple[object, bool] | None:
+    """Return ``(T, allows_none)`` when ``annotation`` is ``Annotated[T, AutowireDecorated()]``.
+
+    ``allows_none`` is true when ``T`` is ``X | None`` / ``Optional[X]``: the
+    parameter can then be filled with ``None`` when the decorated service is
+    missing and :attr:`OnInvalid.NULL` is chosen. Any other annotation
+    returns ``None``.
+    """
+    if get_origin(annotation) is not Annotated:
+        return None
+    wrapped, *metadata = cast("tuple[object, ...]", get_args(annotation))
+    if not any(isinstance(entry, AutowireDecorated) for entry in metadata):
+        return None
+    return _strip_none(wrapped)
+
+
+def _strip_none(annotation: object) -> tuple[object, bool]:
+    """Return ``(T, allows_none)`` for ``T``, ``T | None`` or ``Optional[T]``."""
+    origin = get_origin(annotation)
+    if origin in _UNION_ORIGINS:
+        args = cast("tuple[object, ...]", get_args(annotation))
+        non_none = tuple(arg for arg in args if arg is not type(None))
+        if len(non_none) == 1 and len(non_none) != len(args):
+            return non_none[0], True
+    return annotation, False

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from xtr_dependency_injection.config.configure import configure
 from xtr_dependency_injection.config.parameters import parameters
-from xtr_dependency_injection.decorator.as_decorator import as_decorator
+from xtr_dependency_injection.decorator.as_decorator import AutowireDecorated, as_decorator
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass
 from xtr_dependency_injection.decorator.lifecycle import on_boot, on_shutdown
 
@@ -38,5 +40,5 @@ def stopped() -> None:
 
 @as_decorator(Target)
 class Wrapping:
-    def __init__(self, inner: Target) -> None:
+    def __init__(self, inner: Annotated[Target, AutowireDecorated()]) -> None:
         self.inner: Target = inner

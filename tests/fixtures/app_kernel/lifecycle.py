@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from wireup import Injected
-
 from tests.fixtures.app_kernel.services import Greeter
 from tests.support.bundles import EVENTS
+from xtr_dependency_injection.decorator.autowire import Injected
 from xtr_dependency_injection.decorator.lifecycle import on_boot, on_shutdown
 
 

@@ -35,23 +35,20 @@ class BundleReport:
 
     Attributes:
         name: The bundle's name.
-        qualname: ``module:QualName`` of its class, or the entry point's
-            value when it could not be loaded.
-        source: ``"discovered"``, ``"explicit"`` or ``"required"``.
-        state: ``"active"``, ``"skipped"``, ``"excluded"`` or
-            ``"env_disabled"``.
+        qualname: ``module:QualName`` of its class, or the ``"module:Class"``
+            string for a target that could not be loaded.
+        source: ``"kernel"``, ``"listed"`` or ``"required"``.
+        state: ``"active"``, ``"skipped"`` or ``"env_disabled"``.
         reason: Why it is not active, when it is not.
-        requires: The bundles it requires.
-        optional: The bundles it orders itself after, when active.
+        required: The names of the bundles it requires (resolved).
     """
 
     name: str
     qualname: str
-    source: Literal["discovered", "explicit", "required"]
-    state: Literal["active", "skipped", "excluded", "env_disabled"]
+    source: Literal["kernel", "listed", "required"]
+    state: Literal["active", "skipped", "env_disabled"]
     reason: str | None = None
-    requires: tuple[str, ...] = ()
-    optional: tuple[str, ...] = ()
+    required: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,21 +73,27 @@ class DefinitionReport:
 
     Attributes:
         key: The type and qualifier it is provided under.
-        provider_qualname: Name of the class, factory or instance type.
-        kind: ``"class"``, ``"factory"``, ``"instance"`` or ``"declared"``.
+        provider_qualname: ``module:qualname`` of the class or factory, or of
+            an instance's type — one spelling with the bundle and scan sections.
+        kind: ``"class"``, ``"factory"`` or ``"instance"``.
         lifetime: How long wireup keeps what it builds.
         origin: Who contributed it.
         overrides: The origins of the definitions it replaced.
         decorated_by: The decorators wrapping it, innermost first.
+        tags: The names of every tag added to the definition, in add order.
+        aliases: The alias keys forwarding to this definition, as rendered
+            service names.
     """
 
     key: ServiceKey
     provider_qualname: str
-    kind: Literal["class", "factory", "instance", "declared"]
+    kind: Literal["class", "factory", "instance"]
     lifetime: Lifetime
     origin: Origin
     overrides: tuple[Origin, ...] = ()
     decorated_by: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,14 +139,13 @@ class KernelReport:
                 bundle.name,
                 bundle.source,
                 bundle.state,
-                ", ".join(bundle.requires) or "-",
-                ", ".join(bundle.optional) or "-",
+                ", ".join(bundle.required) or "-",
                 bundle.qualname,
                 bundle.reason or "",
             )
             for bundle in self.bundles
         ]
-        headers = ("Name", "Source", "State", "Requires", "Optional", "Class", "Reason")
+        headers = ("Name", "Source", "State", "Required", "Class", "Reason")
         return _titled("Bundles", _table(headers, rows))
 
     def _configs(self) -> str:
@@ -163,10 +165,22 @@ class KernelReport:
                 str(definition.origin),
                 ", ".join(str(origin) for origin in definition.overrides) or "-",
                 ", ".join(definition.decorated_by) or "-",
+                ", ".join(definition.tags) or "-",
+                ", ".join(definition.aliases) or "-",
             )
             for definition in self.definitions
         ]
-        headers = ("Service", "Provider", "Kind", "Lifetime", "Origin", "Overrides", "Decorated by")
+        headers = (
+            "Service",
+            "Provider",
+            "Kind",
+            "Lifetime",
+            "Origin",
+            "Overrides",
+            "Decorated by",
+            "Tags",
+            "Aliases",
+        )
         return _titled("Definitions", _table(headers, rows))
 
     def _scan(self) -> str:

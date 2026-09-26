@@ -12,8 +12,7 @@ from xtr_dependency_injection import Bundle, Kernel, as_bundle
 from xtr_dependency_injection.testing import assert_zero_config, boot_for_test
 
 if TYPE_CHECKING:
-    from wireup import AsyncContainer
-
+    from xtr_dependency_injection.builder.container_builder import ContainerBuilder
     from xtr_dependency_injection.builder.service_configurator import ServiceConfigurator
 
 pytestmark = pytest.mark.anyio
@@ -33,7 +32,10 @@ class StrictConfig:
 @as_bundle("strict", config=StrictConfig)
 class StrictBundle(Bundle[StrictConfig]):
     @override
-    def load(self, config: StrictConfig, services: ServiceConfigurator) -> None:
+    def load_extension(
+        self, config: StrictConfig, services: ServiceConfigurator, builder: ContainerBuilder
+    ) -> None:
+        del services, builder
         if not config.dsn:
             msg = "strict needs a dsn"
             raise ValueError(msg)
@@ -42,12 +44,15 @@ class StrictBundle(Bundle[StrictConfig]):
 @as_bundle("booting")
 class BootingBundle(Bundle):
     @override
-    async def boot(self, container: AsyncContainer) -> None:
+    async def boot(self) -> None:
         EVENTS.append("boot:booting")
 
 
 def _kernel() -> Kernel:
-    return Kernel("tests.fixtures.app_kernel", bundles=[EchoBundle(), ChorusBundle()])
+    return Kernel(
+        "tests.fixtures.app_kernel",
+        bundles={EchoBundle: {"all": True}, ChorusBundle: {"all": True}},
+    )
 
 
 async def test_boot_for_test_builds_for_the_test_environment() -> None:

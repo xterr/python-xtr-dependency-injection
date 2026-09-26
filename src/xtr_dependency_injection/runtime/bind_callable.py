@@ -15,14 +15,17 @@ from typing import TYPE_CHECKING, cast
 
 import wireup
 
+from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
+from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+from xtr_dependency_injection.runtime.wireup_container import WireupContainer
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from wireup import AsyncContainer, ScopedAsyncContainer
+    from wireup import ScopedAsyncContainer
+    from xtr_service_contracts import ContainerInterface
 
 __all__ = ["bind_callable"]
-
-_ANNOTATION_HINT = "import annotation types at runtime, not under TYPE_CHECKING"
 
 # The scope of the bound call running in this context. One variable serves
 # every binding: calls nest, and each call restores what it replaced.
@@ -30,7 +33,7 @@ _scope: ContextVar[ScopedAsyncContainer] = ContextVar("xtr_dependency_injection_
 
 
 def bind_callable(
-    container: AsyncContainer,
+    container: ContainerInterface,
     target: Callable[..., object] | type,
     /,
     *,
@@ -43,7 +46,9 @@ def bind_callable(
     binding its handlers as it boots fails there, not on the first message.
 
     Args:
-        container: Where dependencies come from.
+        container: Where dependencies come from. Must be a kernel-provided
+            :class:`ContainerInterface` (a :class:`WireupContainer`), so the
+            binder can reach the engine scope machinery underneath.
         target: A function, or a class registered with the container, whose
             instances are called. The class is resolved lazily, on the
             first call.
@@ -60,17 +65,23 @@ def bind_callable(
         injected. A synchronous result is returned as is.
 
     Raises:
-        TypeError: If ``target`` is a class without ``__call__``.
+        TypeError: If ``container`` is a foreign ``ContainerInterface`` (not
+            built by this kernel), or if ``target`` is a class without
+            ``__call__``.
         WireupError: If ``target`` asks for something ``container`` cannot
             provide.
     """
-    presented = signature if signature is not None else _signature_of(target)
+    if not isinstance(container, WireupContainer):
+        msg = "bind_callable needs a kernel-provided container"
+        raise TypeError(msg)
+    engine = container._engine()  # noqa: SLF001 — the binder owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
+    presented = to_engine_signature(signature if signature is not None else _signature_of(target))
     is_class = isinstance(target, type)
 
     async def entry(*args: object, **kwargs: object) -> object:
         call: Callable[..., object]
         if is_class:
-            source = _scope.get() if per_call_scope else container
+            source = _scope.get() if per_call_scope else engine
             call = cast("Callable[..., object]", await source.get(target))
         else:
             call = target
@@ -82,12 +93,10 @@ def bind_callable(
 
     bound: Callable[..., Awaitable[object]]
     if per_call_scope:
-        injected = wireup.inject_from_container(container, scoped_container_supplier=_scope.get)(
-            entry
-        )
+        injected = wireup.inject_from_container(engine, scoped_container_supplier=_scope.get)(entry)
 
         async def scoped(*args: object, **kwargs: object) -> object:
-            async with container.enter_scope() as scope:
+            async with engine.enter_scope() as scope:
                 token = _scope.set(scope)
                 try:
                     return await injected(*args, **kwargs)
@@ -96,7 +105,7 @@ def bind_callable(
 
         bound = scoped
     else:
-        bound = wireup.inject_from_container(container)(entry)
+        bound = wireup.inject_from_container(engine)(entry)
 
     _name_like(bound, target)
     return bound
@@ -124,7 +133,7 @@ def _signature_of(target: Callable[..., object] | type) -> inspect.Signature:
     try:
         signature = inspect.signature(callable_target, eval_str=True)
     except NameError as error:
-        error.add_note(f"while binding {_qualname(target)}: {_ANNOTATION_HINT}")
+        error.add_note(f"while binding {qualified_name(target)}: {ANNOTATION_HINT}")
         raise
     if isinstance(target, type):
         parameters = list(signature.parameters.values())[1:]
@@ -137,7 +146,3 @@ def _name_like(wrapper: Callable[..., object], target: Callable[..., object] | t
     for attribute in ("__name__", "__qualname__", "__module__"):
         if hasattr(target, attribute):
             setattr(wrapper, attribute, getattr(target, attribute))
-
-
-def _qualname(target: object) -> str:
-    return cast("str", getattr(target, "__qualname__", repr(target)))

@@ -1,9 +1,11 @@
-"""The whole kernel over two installed distributions and an application nobody lists bundles in.
+"""The whole kernel over an application that lists two bundles.
 
-``alpha`` requires ``beta`` and orders itself after ``gamma``, which is not
-installed. The application configures ``alpha`` (a base provider and a
-``prod``-only transform), overrides ``beta``'s mailer, decorates ``alpha``'s
-greeter, adds a compiler pass, and hooks boot and shutdown.
+``alpha`` requires ``beta`` (via ``@required_bundle(BetaBundle)``) and marks
+``gamma`` as an optional string target (``@required_bundle("...", ignore_on_invalid=True)``)
+whose module is never installed, exercising the ``ignore_on_invalid`` path.
+The application configures ``alpha`` (a base provider and a ``prod``-only
+transform), overrides ``beta``'s mailer, decorates ``alpha``'s greeter, adds a
+compiler pass, and hooks boot and shutdown.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from xtr_dependency_injection import Kernel, KernelInterface
 from xtr_dependency_injection.builder import Origin
 
 if TYPE_CHECKING:
-    from tests.support.fake_dist import FakeDistributions
+    from tests.support.modules import ScratchModules
     from xtr_dependency_injection import CompiledKernel
 
 pytestmark = pytest.mark.anyio
@@ -44,21 +46,22 @@ class SmtpMailer(Mailer):
 
 @as_bundle("beta")
 class BetaBundle(Bundle):
-    def load(self, config, services) -> None:
-        services.service(SmtpMailer, as_type=Mailer)
+    def load_extension(self, config, services, builder) -> None:
+        _ = services.set(SmtpMailer)
+        services.alias(Mailer, SmtpMailer)
 
-    async def boot(self, container) -> None:
+    async def boot(self) -> None:
         EVENTS.append("boot:beta")
 
-    async def shutdown(self, container) -> None:
+    async def shutdown(self) -> None:
         EVENTS.append("shutdown:beta")
 """
 
 ALPHA = """
 from dataclasses import dataclass
 
-from acme_beta import EVENTS, Mailer
-from xtr_dependency_injection import Bundle, as_bundle
+from acme_beta import EVENTS, BetaBundle, Mailer
+from xtr_dependency_injection import Bundle, as_bundle, required_bundle
 
 
 @dataclass(frozen=True)
@@ -79,16 +82,24 @@ def greeter(config: AlphaConfig, mailer: Mailer) -> Greeter:
     return Greeter(config, mailer)
 
 
-@as_bundle("alpha", config=AlphaConfig, requires=("beta",), optional=("gamma",))
+@required_bundle("gamma_not_installed:GammaBundle", ignore_on_invalid=True)
+@required_bundle(BetaBundle)
+@as_bundle("alpha", config=AlphaConfig)
 class AlphaBundle(Bundle[AlphaConfig]):
-    def load(self, config, services) -> None:
-        services.factory(greeter)
+    def load_extension(self, config, services, builder) -> None:
+        _ = services.set(greeter)
 
-    async def boot(self, container) -> None:
+    async def boot(self) -> None:
         EVENTS.append("boot:alpha")
 
-    async def shutdown(self, container) -> None:
+    async def shutdown(self) -> None:
         EVENTS.append("shutdown:alpha")
+"""
+
+APP_BUNDLES = """
+from acme_alpha import AlphaBundle
+
+BUNDLES = {AlphaBundle: {"all": True}}
 """
 
 APP_CONFIG = """
@@ -110,22 +121,33 @@ def alpha_prod(config: AlphaConfig) -> AlphaConfig:
 """
 
 APP_SERVICES = """
-from wireup import injectable
+from typing import Annotated
 
 from acme_alpha import Greeter
 from acme_beta import Mailer
-from xtr_dependency_injection import ContainerBuilder, Inner, as_decorator, compiler_pass
+from xtr_dependency_injection import (
+    AutowireDecorated,
+    ContainerBuilder,
+    as_decorator,
+    as_service,
+    compiler_pass,
+)
+from xtr_dependency_injection.builder import Definition, Origin
 
 
-@injectable(as_type=Mailer)
 class FakeMailer(Mailer):
     def send(self) -> str:
         return "fake"
 
 
+@as_service()
+def fake_mailer() -> Mailer:
+    return FakeMailer()
+
+
 @as_decorator(Greeter)
 class ShoutingGreeter(Greeter):
-    def __init__(self, inner: Inner[Greeter]) -> None:
+    def __init__(self, inner: Annotated[Greeter, AutowireDecorated()]) -> None:
         self.inner = inner
 
     def greet(self) -> str:
@@ -139,16 +161,23 @@ class Note:
 
 @compiler_pass
 def note_the_mailer(builder: ContainerBuilder) -> None:
-    (mailer,) = builder.definitions(Mailer)
-    builder.instance(Note(f"mailer from {mailer.origin.kind}"))
+    (mailer,) = [d for d in builder.get_definitions() if d.key[0] is Mailer]
+    note = Note(f"mailer from {mailer.origin.kind}")
+    _ = builder.set_definition(
+        Definition(
+            key=(Note, None),
+            provider=note,
+            kind="instance",
+            lifetime="singleton",
+            origin=Origin("app", "acme_app.services:note_the_mailer"),
+        )
+    )
 """
 
 APP_HOOKS = """
-from wireup import Injected
-
 from acme_alpha import Greeter
 from acme_beta import EVENTS
-from xtr_dependency_injection import on_boot, on_shutdown
+from xtr_dependency_injection import Injected, on_boot, on_shutdown
 
 
 @on_boot
@@ -163,11 +192,12 @@ def goodbye() -> None:
 
 
 @pytest.fixture
-def compiled(fake_dist: FakeDistributions) -> CompiledKernel:
-    fake_dist.install("acme-beta", {"beta": "acme_beta:BetaBundle"}, {"acme_beta": BETA})
-    fake_dist.install("acme-alpha", {"alpha": "acme_alpha:AlphaBundle"}, {"acme_alpha": ALPHA})
-    fake_dist.add_modules(
+def compiled(scratch_modules: ScratchModules) -> CompiledKernel:
+    scratch_modules.write(
         {
+            "acme_beta": BETA,
+            "acme_alpha": ALPHA,
+            "acme_app.bundles": APP_BUNDLES,
             "acme_app.config": APP_CONFIG,
             "acme_app.services": APP_SERVICES,
             "acme_app.hooks": APP_HOOKS,
@@ -176,19 +206,33 @@ def compiled(fake_dist: FakeDistributions) -> CompiledKernel:
     return Kernel("acme_app", env="prod").build()
 
 
-def test_the_bundle_report_shows_every_bundle_discovered_and_ordered(
+def test_the_bundle_report_shows_every_bundle_activated_and_ordered(
     compiled: CompiledKernel,
 ) -> None:
     rows = [
-        (report.name, report.source, report.state, report.requires, report.optional)
+        (report.name, report.source, report.state, report.required)
         for report in compiled.report.bundles
+        if report.state == "active"
     ]
 
     assert rows == [
-        ("kernel", "explicit", "active", (), ()),
-        ("beta", "discovered", "active", (), ()),
-        ("alpha", "discovered", "active", ("beta",), ("gamma",)),
+        ("kernel", "kernel", "active", ()),
+        ("beta", "required", "active", ()),
+        ("alpha", "listed", "active", ("beta",)),
     ]
+
+
+def test_an_ignore_on_invalid_target_is_reported_as_skipped(
+    compiled: CompiledKernel,
+) -> None:
+    skipped = [
+        report
+        for report in compiled.report.bundles
+        if report.qualname == "gamma_not_installed:GammaBundle"
+    ]
+
+    assert len(skipped) == 1
+    assert skipped[0].state == "skipped"
 
 
 def test_the_config_is_resolved_with_its_provenance(compiled: CompiledKernel) -> None:
@@ -205,8 +249,7 @@ def test_the_config_is_resolved_with_its_provenance(compiled: CompiledKernel) ->
 async def test_the_application_overrides_the_bundles_service(compiled: CompiledKernel) -> None:
     (mailer,) = [d for d in compiled.report.definitions if d.key[0].__name__ == "Mailer"]
 
-    assert mailer.origin == Origin("app", "acme_app.services:FakeMailer")
-    assert mailer.overrides == (Origin("bundle", "beta"),)
+    assert mailer.origin == Origin("app", "acme_app.services:fake_mailer")
     note = [d for d in compiled.report.definitions if d.key[0].__name__ == "Note"]
     assert len(note) == 1
 

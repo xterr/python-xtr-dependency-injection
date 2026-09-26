@@ -4,11 +4,10 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import pytest
-from typing_extensions import override
 
+from xtr_dependency_injection.builder.service_configurator import Prepend
 from xtr_dependency_injection.bundle import Bundle, BundleMetadata, NoConfig, as_bundle
 from xtr_dependency_injection.bundle.as_bundle import declare_bundle
-from xtr_dependency_injection.config.config_provider import provider_name
 from xtr_dependency_injection.config.config_resolver import resolve_configs
 from xtr_dependency_injection.config.configure import configure
 from xtr_dependency_injection.decorator.when import when
@@ -17,13 +16,13 @@ from xtr_dependency_injection.exception import (
     ConflictingConfigProvidersError,
     UnknownConfigTypeError,
 )
+from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.scan.scanned_object import ScannedObject
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
-    from xtr_dependency_injection.config.config_prepender import ConfigPrepender
 
 
 @dataclass(frozen=True)
@@ -46,34 +45,9 @@ class LogBundle(Bundle[LogConfig]):
     pass
 
 
-@as_bundle("bus", optional=("log", "absent"))
+@as_bundle("bus")
 class BusBundle(Bundle):
-    @override
-    def prepend(self, configs: ConfigPrepender) -> None:
-        if configs.has_bundle("log"):
-            configs.transform("log", _add_channel("bus"))
-        configs.transform("absent", _add_channel("never"))
-
-
-@as_bundle("typed")
-class TypedPrependBundle(Bundle):
-    @override
-    def prepend(self, configs: ConfigPrepender) -> None:
-        configs.transform(LogConfig, _add_channel("typed"))
-
-
-@as_bundle("rogue")
-class RoguePrependBundle(Bundle):
-    @override
-    def prepend(self, configs: ConfigPrepender) -> None:
-        configs.transform("log", lambda _config: "not a config")
-
-
-@as_bundle("to_no_config")
-class NoConfigTargetBundle(Bundle):
-    @override
-    def prepend(self, configs: ConfigPrepender) -> None:
-        configs.transform("kernel", lambda config: config)
+    pass
 
 
 def _add_channel(channel: str) -> Callable[[LogConfig], LogConfig]:
@@ -84,7 +58,9 @@ def _add_channel(channel: str) -> Callable[[LogConfig], LogConfig]:
 
 
 def _scanned(*functions: Callable[..., object]) -> list[ScannedObject]:
-    return [ScannedObject(fn, provider_name(fn), None, order) for order, fn in enumerate(functions)]
+    return [
+        ScannedObject(fn, qualified_name(fn), None, order) for order, fn in enumerate(functions)
+    ]
 
 
 def _resolve(
@@ -92,13 +68,27 @@ def _resolve(
     bundles: tuple[AnyBundle, ...] | None = None,
     env: str = "prod",
     given: tuple[object, ...] = (),
+    prepends: Sequence[Prepend] = (),
 ) -> tuple[object, tuple[str, ...]]:
     bundles = bundles if bundles is not None else (CoreBundle(), LogBundle())
     resolved = resolve_configs(
-        bundles=bundles, providers=_scanned(*functions), inactive={}, env=env, given=given
+        bundles=bundles,
+        providers=_scanned(*functions),
+        inactive={},
+        env=env,
+        given=given,
+        prepends=prepends,
     )
     (report,) = [report for report in resolved.reports if report.bundle == "log"]
     return resolved.values["log"], report.steps
+
+
+def _prepend(source: str, target: str | type, fn: Callable[..., object]) -> Prepend:
+    return Prepend(source=source, target=target, fn=fn, description=qualified_name(fn))
+
+
+def _returns_a_string(_config: object) -> object:
+    return "not a config"
 
 
 @configure
@@ -186,7 +176,12 @@ def test_transforms_run_by_priority_then_scan_order_unconditional_first() -> Non
 
 
 def test_prepends_apply_after_the_base_and_before_transforms() -> None:
-    value, steps = _resolve(base_a, transform_x, bundles=(CoreBundle(), LogBundle(), BusBundle()))
+    value, steps = _resolve(
+        base_a,
+        transform_x,
+        bundles=(CoreBundle(), LogBundle(), BusBundle()),
+        prepends=(_prepend("bus", "log", _add_channel("bus")),),
+    )
 
     assert value == LogConfig(("a", "bus", "x"))
     assert steps == (
@@ -198,14 +193,21 @@ def test_prepends_apply_after_the_base_and_before_transforms() -> None:
 
 
 def test_a_prepend_may_target_a_config_type() -> None:
-    value, _ = _resolve(bundles=(CoreBundle(), LogBundle(), TypedPrependBundle()))
+    value, _ = _resolve(
+        bundles=(CoreBundle(), LogBundle()),
+        prepends=(_prepend("typed", LogConfig, _add_channel("typed")),),
+    )
 
     assert value == LogConfig(("typed",))
 
 
 def test_a_prepend_to_an_inactive_bundle_is_reported_as_skipped() -> None:
     resolved = resolve_configs(
-        bundles=(CoreBundle(), BusBundle()), providers=[], inactive={}, env="prod"
+        bundles=(CoreBundle(), BusBundle()),
+        providers=[],
+        inactive={},
+        env="prod",
+        prepends=(_prepend("bus", "log", _add_channel("bus")),),
     )
 
     ((prepend, reason),) = resolved.skipped
@@ -215,12 +217,18 @@ def test_a_prepend_to_an_inactive_bundle_is_reported_as_skipped() -> None:
 
 def test_a_prepend_returning_another_type_is_refused() -> None:
     with pytest.raises(ConfigProviderError, match="prepend by bundle rogue"):
-        _ = _resolve(bundles=(CoreBundle(), LogBundle(), RoguePrependBundle()))
+        _ = _resolve(
+            bundles=(CoreBundle(), LogBundle()),
+            prepends=(_prepend("rogue", "log", _returns_a_string),),
+        )
 
 
-def test_a_prepend_to_a_bundle_without_config_is_refused() -> None:
-    with pytest.raises(ConfigProviderError, match="takes no config"):
-        _ = _resolve(bundles=(CoreBundle(), NoConfigTargetBundle()))
+def test_a_prepend_targeting_an_unknown_type_is_refused() -> None:
+    with pytest.raises(ConfigProviderError, match="no active bundle owns config type"):
+        _ = _resolve(
+            bundles=(CoreBundle(), LogBundle()),
+            prepends=(_prepend("stray", OrphanConfig, _add_channel("orphan")),),
+        )
 
 
 def test_a_provider_for_a_type_no_bundle_owns_is_refused() -> None:

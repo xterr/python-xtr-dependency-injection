@@ -6,13 +6,14 @@ import pytest
 import wireup
 
 from tests.fixtures.app_kernel_late import LateService
-from tests.support.bundles import ChorusBundle, EchoBundle, EchoConfig
-from xtr_dependency_injection import Bundle, as_bundle, injectables
+from tests.support.bundles import EchoBundle, EchoConfig
+from xtr_dependency_injection import Bundle, Kernel, as_bundle, required_bundle
 from xtr_dependency_injection.exception import (
     ConfigProviderError,
     MissingBundleError,
     UnknownConfigTypeError,
 )
+from xtr_dependency_injection.integration.wireup import engine_container, injectables
 from xtr_dependency_injection.kernel import KernelInterface
 
 pytestmark = pytest.mark.anyio
@@ -33,8 +34,14 @@ class TunedBundle(Bundle[TunedConfig]):
     pass
 
 
+@required_bundle("nowhere_installed:MissingBundle")
+@as_bundle("needs_missing")
+class NeedsMissingBundle(Bundle):
+    pass
+
+
 async def test_the_injectables_build_a_working_container() -> None:
-    container = wireup.create_async_container(injectables=injectables([QuietBundle()]))
+    container = wireup.create_async_container(injectables=injectables([QuietBundle]))
 
     info = await container.get(KernelInterface)
 
@@ -45,44 +52,68 @@ async def test_the_injectables_build_a_working_container() -> None:
 
 async def test_a_given_config_is_the_bundles_base() -> None:
     container = wireup.create_async_container(
-        injectables=injectables([TunedBundle()], configs=[TunedConfig(level=7)])
+        injectables=injectables([TunedBundle], configs=[TunedConfig(level=7)])
     )
 
     assert await container.get(TunedConfig) == TunedConfig(level=7)
 
 
 async def test_without_a_given_config_the_default_is_used() -> None:
-    container = wireup.create_async_container(injectables=injectables([TunedBundle()]))
+    container = wireup.create_async_container(injectables=injectables([TunedBundle]))
 
     assert await container.get(TunedConfig) == TunedConfig()
 
 
-def test_a_missing_requirement_is_not_discovered() -> None:
+def test_a_missing_required_string_is_refused() -> None:
     with pytest.raises(MissingBundleError) as caught:
-        _ = injectables([ChorusBundle()])
+        _ = injectables([NeedsMissingBundle])
 
-    assert (caught.value.name, caught.value.required_by) == ("echo", "chorus")
+    assert caught.value.name == "nowhere_installed:MissingBundle"
+    assert caught.value.required_by == "needs_missing"
 
 
 def test_a_config_no_listed_bundle_declares_is_refused() -> None:
     with pytest.raises(UnknownConfigTypeError):
-        _ = injectables([QuietBundle()], configs=[EchoConfig()])
+        _ = injectables([QuietBundle], configs=[EchoConfig()])
 
 
 def test_parameters_from_a_bundle_need_the_kernel() -> None:
     with pytest.raises(ConfigProviderError, match="parameters need the kernel") as caught:
-        _ = injectables([EchoBundle()])
+        _ = injectables([EchoBundle])
 
     assert caught.value.provider == "bundle echo"
 
 
 def test_parameters_from_a_scanned_provider_need_the_kernel() -> None:
     with pytest.raises(ConfigProviderError, match="provided"):
-        _ = injectables([QuietBundle()], scan=["tests.fixtures.app_parameters"])
+        _ = injectables([QuietBundle], scan=["tests.fixtures.app_parameters"])
 
 
 async def test_scanned_resources_are_registered_as_the_applications() -> None:
-    emitted = injectables([QuietBundle()], scan=["tests.fixtures.app_kernel_late"])
+    emitted = injectables([QuietBundle], scan=["tests.fixtures.app_kernel_late"])
     container = wireup.create_async_container(injectables=emitted)
 
     assert isinstance(await container.get(LateService), LateService)
+
+
+def test_engine_container_returns_the_wireup_container_from_a_compiled_kernel() -> None:
+    compiled = Kernel("json", resources=(), bundles={}).build()
+
+    engine = engine_container(compiled)
+
+    assert isinstance(engine, wireup.AsyncContainer)
+
+
+async def test_engine_container_returns_the_wireup_container_from_a_booted_kernel() -> None:
+    booted = await Kernel("json", resources=(), bundles={}).boot()
+    try:
+        engine = engine_container(booted)
+
+        assert isinstance(engine, wireup.AsyncContainer)
+    finally:
+        await booted.shutdown()
+
+
+def test_engine_container_refuses_a_foreign_kernel() -> None:
+    with pytest.raises(TypeError, match="CompiledKernel or BootedKernel"):
+        _ = engine_container(object())  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]

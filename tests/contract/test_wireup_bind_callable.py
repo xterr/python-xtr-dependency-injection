@@ -10,6 +10,7 @@ import wireup
 from wireup import Injected
 
 from xtr_dependency_injection.runtime import bind_callable
+from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 pytestmark = pytest.mark.anyio
 
@@ -55,14 +56,15 @@ def add(left: int, right: int) -> int:
     return left + right
 
 
-def _container(*extra: object) -> wireup.AsyncContainer:
-    return wireup.create_async_container(
+def _container(*extra: object) -> WireupContainer:
+    engine = wireup.create_async_container(
         injectables=[
             wireup.instance(Greeting(), as_type=Greeting),
             wireup.injectable(GreetHandler),
             *extra,
         ]
     )
+    return WireupContainer(engine)
 
 
 async def test_a_class_target_is_built_lazily_and_its_call_is_filled() -> None:

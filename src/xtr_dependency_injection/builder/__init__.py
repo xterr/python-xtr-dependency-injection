@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .definition import Definition, Lifetime, Origin, ServiceKey
+from .definition import Decorates, Definition, Lifetime, Origin, ServiceKey
 
-__all__ = ["Definition", "Lifetime", "Origin", "ServiceKey"]
+__all__ = ["Decorates", "Definition", "Lifetime", "Origin", "ServiceKey"]

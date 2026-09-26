@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.fake_dist import fake_dist
+from tests.support.modules import scratch_modules
 
-__all__ = ["fake_dist"]
+__all__ = ["scratch_modules"]
 
 pytest_plugins = ["pytester"]
 

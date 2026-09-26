@@ -1,13 +1,19 @@
-"""S5: the bridge reads wireup's marks and keys the way wireup does."""
+"""S5: the bridge keys the way wireup does and answers is_registered without side effects.
+
+These tests pin wireup's own behaviour, so they use ``wireup.injectable``
+directly — this file is one of the two contract modules that intentionally
+keep the wireup marker.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 import wireup
+from wireup import AsyncContainer
 
-from xtr_dependency_injection.compiler._wireup_bridge import declaration_of, provided_type
+from xtr_dependency_injection.compiler._wireup_bridge import is_registered, key_type
 
 pytestmark = pytest.mark.anyio
 
@@ -18,10 +24,6 @@ class Contract:
 
 @wireup.injectable
 class Marked:
-    pass
-
-
-class InheritsTheMark(Marked):
     pass
 
 
@@ -48,47 +50,40 @@ class Unmarked:
     pass
 
 
-def test_a_marked_class_is_declared() -> None:
-    declaration = declaration_of(Marked)
-
-    assert declaration is not None
-    assert declaration.obj is Marked
-    assert declaration.lifetime == "singleton"
-    assert declaration.qualifier is None
-    assert declaration.as_type is None
-
-
-def test_every_field_of_the_mark_is_read() -> None:
-    declaration = declaration_of(Implementation)
-
-    assert declaration is not None
-    assert declaration.as_type is Contract
-    assert declaration.qualifier == "q"
-    assert declaration.lifetime == "scoped"
-
-
-def test_a_subclass_inheriting_the_mark_is_not_declared() -> None:
-    assert declaration_of(InheritsTheMark) is None
-
-
-def test_an_unmarked_object_is_not_declared() -> None:
-    assert declaration_of(Unmarked) is None
-    assert declaration_of(Unmarked()) is None
-
-
 @pytest.mark.parametrize(
-    ("declared", "expected"),
-    [(Marked, Marked), (Implementation, Contract), (product, Product), (product_resource, Product)],
+    ("provider", "as_type", "qualifier", "expected"),
+    [
+        (Marked, None, None, Marked),
+        (Implementation, Contract, "q", Contract),
+        (product, None, None, Product),
+        (product_resource, None, None, Product),
+    ],
 )
-async def test_the_provided_type_is_the_key_wireup_registers(
-    declared: object, expected: type
+async def test_the_key_type_is_what_wireup_registers(
+    provider: Callable[..., object] | type,
+    as_type: type | None,
+    qualifier: str | None,
+    expected: type,
 ) -> None:
-    declaration = declaration_of(declared)
-    assert declaration is not None
-    container = wireup.create_async_container(injectables=[declared])
+    container = wireup.create_async_container(injectables=[provider])
 
-    key = provided_type(declaration)
+    key = key_type(provider, as_type)
 
     assert key is expected
     async with container.enter_scope() as scope:
-        assert await scope.get(key, declaration.qualifier) is not None
+        assert await scope.get(key, qualifier) is not None
+
+
+async def test_is_registered_answers_by_type_and_qualifier() -> None:
+    container = wireup.create_async_container(injectables=[Marked, Implementation])
+
+    assert is_registered(container, Marked, None)
+    assert is_registered(container, Contract, "q")
+    assert not is_registered(container, Contract, None)
+    assert not is_registered(container, Unmarked, None)
+
+
+async def test_is_registered_finds_wireups_self_registered_container() -> None:
+    container = wireup.create_async_container()
+
+    assert is_registered(container, AsyncContainer, None)

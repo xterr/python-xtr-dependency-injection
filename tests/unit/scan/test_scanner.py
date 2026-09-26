@@ -5,9 +5,32 @@ import pytest
 from tests.fixtures.app_scan import hooks, services
 from xtr_dependency_injection.exception import ConfigProviderError, ResourceImportError
 from xtr_dependency_injection.scan import DEFAULT_EXCLUDES
-from xtr_dependency_injection.scan.scanner import Scanner
+from xtr_dependency_injection.scan.scanned_object import ScannedObject
+from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 
 APP = "tests.fixtures.app_scan"
+
+
+class First:
+    pass
+
+
+class Second:
+    pass
+
+
+def _scanned(obj: object, order: int) -> ScannedObject:
+    return ScannedObject(obj, f"tests:{getattr(obj, '__qualname__', obj)}", None, order)
+
+
+def test_extend_keeps_every_queue_in_order() -> None:
+    first = ScanResult(services=[_scanned(First, order=1)])
+    second = ScanResult(services=[_scanned(Second, order=2)], marked=[_scanned(Second, order=2)])
+
+    first.extend(second)
+
+    assert [entry.obj for entry in first.services] == [First, Second]
+    assert [entry.obj for entry in first.marked] == [Second]
 
 
 def _scanner(env: str = "dev") -> Scanner:
@@ -49,10 +72,10 @@ def test_only_objects_defined_in_a_module_are_candidates() -> None:
     ]
 
 
-def test_a_wireup_marked_object_is_declared_and_a_service() -> None:
+def test_a_marked_object_is_marked_and_a_service() -> None:
     result = _scanner().scan([f"{APP}.services"], owner=None)
 
-    assert [scanned.obj for scanned in result.declared] == [services.Marked]
+    assert [scanned.obj for scanned in result.marked] == [services.Marked]
 
 
 def test_an_object_is_found_once_across_scans() -> None:

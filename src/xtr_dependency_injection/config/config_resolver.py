@@ -5,7 +5,9 @@ For every active bundle, in order:
 1. its config type's default, ``C()``;
 2. the application's base provider, if any — one conditional on the
    environment beats an unconditional one;
-3. other bundles' prepends, in bundle order;
+3. other bundles' prepends (recorded via
+   ``builder.prepend_extension_config`` from ``Bundle.prepend_extension``),
+   in call order;
 4. the application's transforms — unconditional, then conditional; within
    each, by priority, highest first, then in scan order.
 
@@ -21,17 +23,19 @@ from typing import TYPE_CHECKING, Final, cast
 from xtr_dependency_injection.bundle import NoConfig
 from xtr_dependency_injection.diagnostics import ConfigReport
 from xtr_dependency_injection.exception import (
+    CircularBundleDependencyError,
     ConfigProviderError,
     ConflictingConfigProvidersError,
     UnknownConfigTypeError,
 )
 
-from .config_prepender import ConfigPrepender, Prepend
+from .alias_of import alias_of_fields
 from .config_provider import ConfigProvider, config_provider_of
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from xtr_dependency_injection.builder.service_configurator import Prepend
     from xtr_dependency_injection.bundle.bundle import AnyBundle
     from xtr_dependency_injection.scan.scanned_object import ScannedObject
 
@@ -48,7 +52,7 @@ class ResolvedConfigs:
         values: Resolved config by bundle name, ``NoConfig`` included.
         reports: One per active bundle, in bundle order.
         skipped: ``(prepend, reason)`` for each prepend whose target is not
-            active.
+            active or is not owned by any known bundle.
     """
 
     values: Mapping[str, object]
@@ -62,13 +66,14 @@ class _Step:
     apply: Callable[[object], object]
 
 
-def resolve_configs(
+def resolve_configs(  # noqa: PLR0913 — one call configures every step of the resolution.
     *,
     bundles: Sequence[AnyBundle],
     providers: Sequence[ScannedObject],
     inactive: Mapping[type, str],
     env: str,
     given: Sequence[object] = (),
+    prepends: Sequence[Prepend] = (),
 ) -> ResolvedConfigs:
     """Return the config of every bundle in ``bundles``, resolved in order.
 
@@ -80,6 +85,7 @@ def resolve_configs(
         env: The environment being built.
         given: Config values acting as unconditional base providers — how
             standalone ``injectables()`` receives its configs.
+        prepends: What bundles recorded via ``prepend_extension``.
 
     Raises:
         UnknownConfigTypeError: If a provider or given config targets a type
@@ -88,26 +94,36 @@ def resolve_configs(
             providers.
         ConfigProviderError: If a provider or prepend returns the wrong type.
     """
+    del (
+        env
+    )  # kept for API compatibility (env-conditional prepends run via @when on prepend_extension)
     owned = {type(bundle).metadata().config: type(bundle).metadata().name for bundle in bundles}
+    active_by_name = {type(bundle).metadata().name: bundle for bundle in bundles}
     parsed = [
-        _owned(config_provider_of(cast("Callable[..., object]", scanned.obj)), owned, inactive)
-        for scanned in providers
+        config_provider_of(cast("Callable[..., object]", scanned.obj)) for scanned in providers
     ]
+    for provider in parsed:
+        _ = _owner(provider.config_type, provider.name, owned, inactive)
     for value in given:
         _ = _owner(type(value), _STANDALONE, owned, inactive)
-    prepends = _prepends(bundles, env)
+    resolved_prepends = _resolve_prepends(prepends, owned)
+    alias_edges, skipped_aliases = _resolve_alias_edges(bundles, active_by_name)
+    _check_alias_cycles(bundles, alias_edges)
     values: dict[str, object] = {}
     reports: list[ConfigReport] = []
+    pending_alias: dict[str, list[_Step]] = {}
     for bundle in bundles:
         metadata = type(bundle).metadata()
         config_type = metadata.config
+        alias_steps = pending_alias.pop(metadata.name, [])
         steps = (
             _steps(
                 metadata.name,
                 config_type,
                 [provider for provider in parsed if provider.config_type is config_type],
                 [value for value in given if type(value) is config_type],
-                prepends,
+                resolved_prepends,
+                alias_steps,
             )
             if config_type is not NoConfig
             else []
@@ -117,22 +133,25 @@ def resolve_configs(
             value = step.apply(value)
         values[metadata.name] = value
         reports.append(ConfigReport(metadata.name, value, ("default", *(s.label for s in steps))))
-    skipped = tuple(
-        (
-            f"{prepend.description} (prepend by bundle {prepend.source})",
-            "target bundle is not active",
-        )
-        for prepend in prepends
-        if prepend.target is None
+        if config_type is not NoConfig:
+            _queue_alias_forwards(
+                owner=metadata.name,
+                value=value,
+                edges=alias_edges,
+                pending=pending_alias,
+            )
+    skipped = (
+        *(
+            (
+                f"{prepend.description} (prepend by bundle {prepend.source})",
+                "target bundle is not active",
+            )
+            for prepend, target_name in resolved_prepends
+            if target_name is None
+        ),
+        *skipped_aliases,
     )
     return ResolvedConfigs(values, tuple(reports), skipped)
-
-
-def _owned(
-    provider: ConfigProvider, owned: Mapping[type, str], inactive: Mapping[type, str]
-) -> ConfigProvider:
-    _ = _owner(provider.config_type, provider.name, owned, inactive)
-    return provider
 
 
 def _owner(
@@ -146,28 +165,45 @@ def _owner(
     return owner
 
 
-def _prepends(bundles: Sequence[AnyBundle], env: str) -> list[Prepend]:
-    active = {type(b).metadata().name: type(b).metadata().config for b in bundles}
-    recorded: list[Prepend] = []
-    for bundle in bundles:
-        source = type(bundle).metadata().name
-        bundle.prepend(ConfigPrepender(env=env, source=source, active=active, prepends=recorded))
-    return recorded
+def _resolve_prepends(
+    prepends: Sequence[Prepend], owned: Mapping[type, str]
+) -> list[tuple[Prepend, str | None]]:
+    """Resolve every prepend's target to an active bundle name, or ``None`` when inactive."""
+    resolved: list[tuple[Prepend, str | None]] = []
+    for prepend in prepends:
+        target = prepend.target
+        if isinstance(target, str):
+            name = target if target in owned.values() else None
+        else:
+            name = owned.get(target)
+            if name is None:
+                # Unknown type owned by no active bundle: raise here so the source is named.
+                raise ConfigProviderError(
+                    f"prepend by bundle {prepend.source}",
+                    f"no active bundle owns config type {target.__qualname__}",
+                )
+        resolved.append((prepend, name))
+    return resolved
 
 
-def _steps(
+def _steps(  # noqa: PLR0913, PLR0917 — one call assembles every ordered step for one bundle.
     bundle: str,
     config_type: type,
     providers: Sequence[ConfigProvider],
     given: Sequence[object],
-    prepends: Sequence[Prepend],
+    prepends: Sequence[tuple[Prepend, str | None]],
+    alias_steps: Sequence[_Step],
 ) -> list[_Step]:
     """Return the steps resolving ``bundle``'s config, in the order they apply."""
     steps = _base(config_type, providers, given)
+    if steps and alias_steps:
+        base_label = steps[0].label.removeprefix("base ")
+        raise ConflictingConfigProvidersError(config_type, (base_label, alias_steps[0].label))
+    steps.extend(alias_steps)
     steps.extend(
         _Step(f"prepend {prepend.source}", _checked(prepend, config_type))
-        for prepend in prepends
-        if prepend.target == bundle
+        for prepend, target_name in prepends
+        if target_name == bundle
     )
     transforms = [provider for provider in providers if provider.form == "transform"]
     for conditional in (False, True):
@@ -215,6 +251,78 @@ def _replacing(value: object) -> Callable[[object], object]:
         return value
 
     return replace
+
+
+def _resolve_alias_edges(
+    bundles: Sequence[AnyBundle], active_by_name: Mapping[str, AnyBundle]
+) -> tuple[tuple[tuple[str, str, str, type], ...], tuple[tuple[str, str], ...]]:
+    """Return (active alias edges, skipped entries) for the active bundle set.
+
+    Each edge is ``(owner, target, field, target_config_type)``. An owner
+    field pointing at an inactive bundle produces a skipped entry.
+    """
+    edges: list[tuple[str, str, str, type]] = []
+    skipped: list[tuple[str, str]] = []
+    for bundle in bundles:
+        metadata = type(bundle).metadata()
+        if metadata.config is NoConfig:
+            continue
+        for field_name, target in alias_of_fields(metadata.config):
+            label = f"alias_of {metadata.name}.{field_name}"
+            target_bundle = active_by_name.get(target)
+            if target_bundle is None:
+                skipped.append((label, "target bundle is not active"))
+                continue
+            target_config_type = type(target_bundle).metadata().config
+            if target_config_type is NoConfig:
+                raise ConfigProviderError(label, "target bundle has no config to alias to")
+            edges.append((metadata.name, target, field_name, target_config_type))
+    return tuple(edges), tuple(skipped)
+
+
+def _check_alias_cycles(
+    bundles: Sequence[AnyBundle], edges: Sequence[tuple[str, str, str, type]]
+) -> None:
+    """Raise ``CircularBundleDependencyError`` if any alias edge contradicts bundle order.
+
+    Owner must resolve before target. When the bundle order — already
+    topological over required edges — places the owner after the target, no
+    ordering satisfies both constraints, so the alias closes a cycle.
+    """
+    positions = {type(bundle).metadata().name: index for index, bundle in enumerate(bundles)}
+    for owner, target, field, _ in edges:
+        if positions[owner] > positions[target]:
+            raise CircularBundleDependencyError(
+                (target, owner, target),
+            )
+        # A self-alias is also a cycle: an owner cannot forward to itself.
+        if owner == target:
+            raise CircularBundleDependencyError((owner, owner))
+        del field
+
+
+def _queue_alias_forwards(
+    *,
+    owner: str,
+    value: object,
+    edges: Sequence[tuple[str, str, str, type]],
+    pending: dict[str, list[_Step]],
+) -> None:
+    """Record ``owner``'s non-``None`` aliased field values as steps for their targets."""
+    for edge_owner, target, field, target_config_type in edges:
+        if edge_owner != owner:
+            continue
+        forwarded: object = getattr(value, field, None)
+        if forwarded is None:
+            continue
+        if not isinstance(forwarded, target_config_type):
+            raise ConfigProviderError(
+                f"alias_of {owner}.{field}",
+                f"returned {type(forwarded).__qualname__}, not {target_config_type.__qualname__}",
+            )
+        pending.setdefault(target, []).append(
+            _Step(f"alias_of {owner}.{field}", _replacing(forwarded))
+        )
 
 
 def _checked(prepend: Prepend, config_type: type) -> Callable[[object], object]:

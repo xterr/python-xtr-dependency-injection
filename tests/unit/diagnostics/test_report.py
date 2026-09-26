@@ -20,9 +20,9 @@ class Mailer:
 def _report() -> KernelReport:
     return KernelReport(
         bundles=(
-            BundleReport("kernel", "x:KernelBundle", "explicit", "active"),
-            BundleReport("alpha", "a:Alpha", "discovered", "active", None, ("beta",), ("gamma",)),
-            BundleReport("gamma", "g:Gamma", "discovered", "skipped", "ImportError"),
+            BundleReport("kernel", "x:KernelBundle", "kernel", "active"),
+            BundleReport("alpha", "a:Alpha", "listed", "active", None, ("beta",)),
+            BundleReport("gamma", "g:Gamma", "required", "skipped", "ImportError"),
         ),
         configs=(ConfigReport("alpha", 3, ("default", "base app.config:alpha")),),
         definitions=(
@@ -34,6 +34,8 @@ def _report() -> KernelReport:
                 origin=Origin("app", "app.mail:Mailer"),
                 overrides=(Origin("bundle", "alpha"),),
                 decorated_by=("app.mail:Tracing",),
+                tags=("kernel.reset",),
+                aliases=("app.mail.MailerInterface",),
             ),
         ),
         scan=ScanReport(modules=("app", "app.mail"), skipped=(("app.dev:seed", "not in prod"),)),
@@ -43,11 +45,11 @@ def _report() -> KernelReport:
 BUNDLES = """\
 Bundles
 =======
-Name    Source      State    Requires  Optional  Class           Reason
-------  ----------  -------  --------  --------  --------------  -----------
-kernel  explicit    active   -         -         x:KernelBundle
-alpha   discovered  active   beta      gamma     a:Alpha
-gamma   discovered  skipped  -         -         g:Gamma         ImportError"""
+Name    Source    State    Required  Class           Reason
+------  --------  -------  --------  --------------  -----------
+kernel  kernel    active   -         x:KernelBundle
+alpha   listed    active   beta      a:Alpha
+gamma   required  skipped  -         g:Gamma         ImportError"""
 
 
 def test_the_bundles_section_is_a_fixed_width_table() -> None:
@@ -73,6 +75,15 @@ def test_the_definitions_section_shows_origin_overrides_and_decorators() -> None
     assert "app app.mail:Mailer" in rendered
     assert "bundle alpha" in rendered
     assert "app.mail:Tracing" in rendered
+
+
+def test_the_definitions_section_lists_tags_and_aliases() -> None:
+    rendered = _report().render("definitions")
+
+    assert "Tags" in rendered
+    assert "Aliases" in rendered
+    assert "kernel.reset" in rendered
+    assert "app.mail.MailerInterface" in rendered
 
 
 def test_the_scan_section_lists_modules_and_skipped_objects() -> None:

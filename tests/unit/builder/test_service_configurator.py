@@ -10,9 +10,7 @@ from xtr_dependency_injection.builder import Origin
 from xtr_dependency_injection.builder.service_configurator import (
     BuildState,
     Phase,
-    ResettableRequest,
     ServiceConfigurator,
-    kind_of,
 )
 from xtr_dependency_injection.exception import BuilderFrozenError, BuilderPhaseError
 
@@ -37,10 +35,6 @@ def untyped():  # noqa: ANN201
     return Mailer()
 
 
-def _ignore(_obj: object, _meta: object, _services: ServiceConfigurator) -> None:
-    pass
-
-
 def _state() -> BuildState:
     return BuildState(env="dev", debug=True, bundles=("kernel", "alpha"), configs={})
 
@@ -49,38 +43,22 @@ def _services(state: BuildState | None = None) -> ServiceConfigurator:
     return ServiceConfigurator(state if state is not None else _state(), Origin("bundle", "alpha"))
 
 
-def test_env_debug_and_active_bundles_are_exposed() -> None:
-    services = _services()
-
-    assert (services.env, services.debug) == ("dev", True)
-    assert services.has_bundle("alpha")
-    assert not services.has_bundle("beta")
-
-
 def test_an_instance_is_keyed_by_its_own_type() -> None:
     state = _state()
     obj = Mailer()
 
-    _services(state).instance(obj, qualifier="main", priority=2)
+    _ = _services(state).instance(obj, qualifier="main")
 
     definition = state.store.get((Mailer, "main"))
     assert definition is not None
-    assert (definition.provider, definition.kind, definition.priority) == (obj, "instance", 2)
+    assert (definition.provider, definition.kind) == (obj, "instance")
     assert definition.origin == Origin("bundle", "alpha")
 
 
-def test_an_instance_may_be_keyed_by_as_type() -> None:
+def test_set_for_a_factory_is_keyed_by_its_return_type() -> None:
     state = _state()
 
-    _services(state).instance(SmtpMailer(), as_type=Mailer)
-
-    assert state.store.get((Mailer, None)) is not None
-
-
-def test_a_factory_is_keyed_by_its_return_type() -> None:
-    state = _state()
-
-    _services(state).factory(mailer, lifetime="scoped")
+    _ = _services(state).set(mailer, lifetime="scoped")
 
     definition = state.store.get((Mailer, None))
     assert definition is not None
@@ -90,96 +68,83 @@ def test_a_factory_is_keyed_by_its_return_type() -> None:
 def test_a_generator_factory_is_keyed_by_its_yield_type() -> None:
     state = _state()
 
-    _services(state).factory(mailer_resource)
+    _ = _services(state).set(mailer_resource)
 
     assert state.store.get((Mailer, None)) is not None
 
 
 def test_a_factory_without_a_return_type_is_refused() -> None:
     with pytest.raises(FactoryReturnTypeIsEmptyError):
-        _services().factory(untyped)
+        _ = _services().set(untyped)
 
 
-def test_a_factory_must_be_a_function() -> None:
-    with pytest.raises(TypeError, match="takes a function"):
-        _services().factory(Mailer)
+def test_set_of_something_that_is_not_a_class_or_a_function_is_refused() -> None:
+    with pytest.raises(TypeError, match="takes a class or a function"):
+        _ = _services().set(Mailer())  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
 
-def test_a_service_is_keyed_by_its_class() -> None:
+def test_set_registers_a_class_under_its_own_type() -> None:
     state = _state()
 
-    _services(state).service(SmtpMailer, as_type=Mailer)
+    _ = _services(state).set(SmtpMailer)
 
-    definition = state.store.get((Mailer, None))
+    definition = state.store.get((SmtpMailer, None))
     assert definition is not None
     assert (definition.provider, definition.kind) == (SmtpMailer, "class")
 
 
-def test_a_service_already_provided_by_the_same_class_is_a_no_op() -> None:
+def test_set_for_the_same_key_and_provider_returns_the_existing_definition() -> None:
     state = _state()
-    _services(state).service(Mailer)
+    first = _services(state).set(SmtpMailer)
 
-    _services(state).service(Mailer, qualifier="again")
+    second = _services(state).set(SmtpMailer)
 
-    assert state.store.get((Mailer, "again")) is None
+    assert first is second
+    assert len(state.store.entries()) == 1
 
 
-def test_scan_records_a_late_scan_for_the_bundle() -> None:
+def test_set_under_another_qualifier_is_added_when_the_class_is_already_defined() -> None:
+    state = _state()
+    _ = _services(state).set(SmtpMailer)
+
+    _ = _services(state).set(SmtpMailer, qualifier="mw")
+
+    assert state.store.get((SmtpMailer, "mw")) is not None
+
+
+def test_set_and_alias_share_the_target_key() -> None:
+    state = _state()
+    _ = _services(state).set(SmtpMailer)
+
+    _services(state).alias(Mailer, SmtpMailer, alias_qualifier="mw")
+
+    assert state.aliases == {(Mailer, "mw"): (SmtpMailer, None)}
+
+
+def test_load_records_a_late_scan_for_the_bundle() -> None:
     state = _state()
 
-    _services(state).scan("pkg.commands")
+    _services(state).load("pkg.commands")
 
     assert state.late_scans == [("alpha", ("pkg.commands",))]
 
 
-def test_autoconfigure_records_the_bundle() -> None:
-    state = _state()
-
-    _services(state).autoconfigure(lambda _obj: (), _ignore)
-
-    assert [a.owner for a in state.autoconfigurators] == ["alpha"]
-
-
-def test_parameters_are_recorded_with_their_source() -> None:
-    state = _state()
-
-    _services(state).parameters({"x": 1})
-
-    assert state.parameters == [("bundle alpha", {"x": 1})]
-
-
-def test_resettable_records_a_request() -> None:
-    state = _state()
-
-    _services(state).resettable(Mailer, method="clear")
-
-    assert state.resettables == [ResettableRequest((Mailer, None), "clear")]
-
-
 @pytest.mark.parametrize("phase", ["autoconfigure", "process"])
-def test_scan_belongs_to_the_load_phase(phase: Phase) -> None:
+def test_load_belongs_to_the_load_phase(phase: Phase) -> None:
     state = _state()
     state.phase = phase
 
     with pytest.raises(BuilderPhaseError) as caught:
-        _services(state).scan("pkg")
+        _services(state).load("pkg")
 
-    assert (caught.value.operation, caught.value.phase) == ("scan", phase)
-
-
-def test_autoconfigure_belongs_to_the_load_phase() -> None:
-    state = _state()
-    state.phase = "process"
-
-    with pytest.raises(BuilderPhaseError):
-        _services(state).autoconfigure(lambda _obj: (), _ignore)
+    assert (caught.value.operation, caught.value.phase) == ("load", phase)
 
 
 def test_defining_is_allowed_while_autoconfiguring() -> None:
     state = _state()
     state.phase = "autoconfigure"
 
-    _services(state).service(Mailer)
+    _ = _services(state).set(Mailer)
 
     assert state.store.get((Mailer, None)) is not None
 
@@ -189,10 +154,12 @@ def test_nothing_is_allowed_once_frozen() -> None:
     state.phase = "frozen"
 
     with pytest.raises(BuilderFrozenError):
-        _services(state).service(Mailer)
+        _ = _services(state).set(Mailer)
 
 
-def test_kind_of_judges_the_provider() -> None:
-    assert kind_of(Mailer) == "class"
-    assert kind_of(mailer) == "factory"
-    assert kind_of(Mailer()) == "instance"
+def test_a_definition_can_be_tagged_kernel_reset_for_the_compiler_to_wrap() -> None:
+    state = _state()
+
+    definition = _services(state).set(mailer).add_tag("kernel.reset", method="clear")
+
+    assert definition.get_tag("kernel.reset") == [{"method": "clear"}]

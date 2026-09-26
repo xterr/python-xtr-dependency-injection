@@ -10,8 +10,8 @@ __all__ = ["DuplicateBundleError"]
 class DuplicateBundleError(DependencyInjectionError):
     """Two bundles, or two entry points, claim one name.
 
-    A name identifies a bundle everywhere — in ``requires``, in
-    ``exclude_bundles``, in a config prepend — so it must mean one thing.
+    A name identifies a bundle everywhere — in bundle reports, in a config
+    prepend, in ``kernel.bundles`` — so it must mean one thing.
     """
 
     name: str

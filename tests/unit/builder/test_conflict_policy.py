@@ -41,13 +41,22 @@ def test_a_bundle_arriving_after_the_app_is_outranked() -> None:
     assert store.overrides_of((Mailer, None)) == (ALPHA,)
 
 
-def test_the_app_overrides_the_kernel() -> None:
+def test_the_app_cannot_override_the_kernel() -> None:
     store = DefinitionStore()
     store.add(_definition(KERNEL))
 
-    store.add(_definition(APP))
+    with pytest.raises(DuplicateServiceError) as caught:
+        store.add(_definition(APP))
 
-    assert store.overrides_of((Mailer, None)) == (KERNEL,)
+    assert (caught.value.first, caught.value.second) == (KERNEL, APP)
+
+
+def test_a_bundle_cannot_override_the_kernel() -> None:
+    store = DefinitionStore()
+    store.add(_definition(KERNEL))
+
+    with pytest.raises(DuplicateServiceError):
+        store.add(_definition(ALPHA))
 
 
 def test_two_bundles_conflict() -> None:
@@ -68,11 +77,11 @@ def test_two_app_definitions_conflict() -> None:
         store.add(_definition(Origin("app", "app:Other")))
 
 
-def test_replace_is_allowed_between_bundles_and_recorded() -> None:
+def test_overwrite_is_allowed_between_bundles_and_recorded() -> None:
     store = DefinitionStore()
     store.add(_definition(ALPHA))
 
-    store.replace(_definition(BETA, provider="other"))
+    store.overwrite(_definition(BETA, provider="other"))
 
     definition = store.get((Mailer, None))
     assert definition is not None
@@ -80,14 +89,14 @@ def test_replace_is_allowed_between_bundles_and_recorded() -> None:
     assert store.overrides_of((Mailer, None)) == (ALPHA,)
 
 
-def test_definitions_keep_declaration_order() -> None:
+def test_entries_keep_declaration_order() -> None:
     store = DefinitionStore()
     first = Definition((Mailer, "a"), Mailer, "class", "singleton", ALPHA)
     second = Definition((Mailer, "b"), Mailer, "class", "singleton", ALPHA)
     store.add(second)
     store.add(first)
 
-    assert store.definitions() == (second, first)
+    assert store.entries() == (second, first)
 
 
 def test_a_removed_definition_is_gone() -> None:
@@ -97,24 +106,4 @@ def test_a_removed_definition_is_gone() -> None:
     store.remove((Mailer, None))
 
     assert store.get((Mailer, None)) is None
-    assert store.definitions() == ()
-
-
-def test_has_provider_matches_by_identity() -> None:
-    store = DefinitionStore()
-    store.add(_definition(ALPHA))
-
-    assert store.has_provider(Mailer)
-    assert not store.has_provider(object())
-
-
-def test_update_changes_fields_without_an_override() -> None:
-    store = DefinitionStore()
-    store.add(_definition(ALPHA))
-
-    store.update((Mailer, None), reset_method="reset")
-
-    definition = store.get((Mailer, None))
-    assert definition is not None
-    assert definition.reset_method == "reset"
-    assert store.overrides_of((Mailer, None)) == ()
+    assert store.entries() == ()
