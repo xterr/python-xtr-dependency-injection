@@ -54,7 +54,10 @@ class Decoration:
     arguments: Mapping[str, object] = field(default_factory=dict)
 
 
-def emission_order(definitions: Sequence[Definition]) -> list[Definition]:
+def emission_order(
+    definitions: Sequence[Definition],
+    forwards: Mapping[ServiceKey, ServiceKey] | None = None,
+) -> list[Definition]:
     """Return ``definitions`` in emission order.
 
     Order = wireup ``Sequence[T]``/``Mapping[Hashable, T]`` order. The seed is
@@ -63,9 +66,35 @@ def emission_order(definitions: Sequence[Definition]) -> list[Definition]:
     ``before``/``after``) and by ``before``/``after`` constraints. Items are
     identified by their built type's ``module:qualname``.
 
+    An alias's forwarding definition is not sorted on its own: it follows its
+    target, right after it. So a collection of the alias type — every class
+    registered under ``@as_alias(Base, qualifier=...)`` — comes out in the
+    order the targets were given.
+
     Args:
         definitions: Every definition, in declaration order.
+        forwards: The forwarding definitions' keys, each mapped to its target's.
     """
+    forwarding = forwards if forwards is not None else {}
+    following: dict[ServiceKey, list[Definition]] = {}
+    own: list[Definition] = []
+    for definition in definitions:
+        target = forwarding.get(definition.key)
+        if target is None:
+            own.append(definition)
+        else:
+            following.setdefault(target, []).append(definition)
+    ordered: list[Definition] = []
+    for definition in _sorted(own):
+        ordered.append(definition)
+        ordered.extend(following.pop(definition.key, ()))
+    for remaining in following.values():  # a target no longer defined: keep them, last
+        ordered.extend(remaining)
+    return ordered
+
+
+def _sorted(definitions: Sequence[Definition]) -> list[Definition]:
+    """Sort ``definitions`` by priority, then ``before``/``after``, then declaration order."""
     identifiers: list[str] = [_identifier(index, d) for index, d in enumerate(definitions)]
     by_identifier: dict[str, Definition] = dict(zip(identifiers, definitions, strict=True))
     type_to_identifiers: dict[type, list[str]] = {}

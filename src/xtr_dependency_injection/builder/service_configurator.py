@@ -90,6 +90,10 @@ class BuildState:
         prepends: Config prepends bundles recorded, in call order.
         aliases: The alias table ``alias_key -> target_key``.
         alias_origins: Who contributed each alias, for the conflict policy.
+        forwards: The alias keys ``ReplaceAliasByActualDefinitionPass`` gave a
+            forwarding definition, each mapped to the definition it forwards to;
+            emission places each one right after its target, so a collection
+            of the alias type follows the targets' order.
         compiler: The compiler: its pass config holds every pass to run,
             and its log what the passes reported.
         candidates: Every service candidate the scans found, which the
@@ -115,6 +119,7 @@ class BuildState:
     prepends: list[Prepend] = field(default_factory=list)
     aliases: dict[ServiceKey, ServiceKey] = field(default_factory=dict)
     alias_origins: dict[ServiceKey, Origin] = field(default_factory=dict)
+    forwards: dict[ServiceKey, ServiceKey] = field(default_factory=dict)
     compiler: Compiler = field(default_factory=Compiler)
     candidates: list[ScannedObject] = field(default_factory=list)
     scanned_decorators: list[ScannedObject] = field(default_factory=list)

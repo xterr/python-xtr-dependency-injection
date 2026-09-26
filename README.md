@@ -786,7 +786,10 @@ async def between_messages(container: ContainerInterface) -> None:
 
 Ordering — `@as_tagged_item(index=, priority=, before=, after=)`: collection order = global
 priority desc, ties broken by `before` / `after` constraints. A contradiction, unsatisfiable
-bound or cycle raises `ServiceOrderError`.
+bound or cycle raises `ServiceOrderError`. An alias takes its target's place: tagged items
+collected through `@as_alias(Base, qualifier=...)` come out of `Sequence[Base]` and
+`Mapping[Hashable, Base]` in the order their classes were given, whatever order the aliases
+were declared in.
 
 ## Testing
 

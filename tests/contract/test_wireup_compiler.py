@@ -116,6 +116,37 @@ def test_emission_order_is_priority_desc_then_definition_order() -> None:
     assert [d.key[1] for d in ordered] == ["alpha_high", "app", "beta", "alpha_low", "kernel"]
 
 
+def test_a_forwarding_definition_follows_its_target() -> None:
+    first = _definition(First, First, APP, priority=1)
+    second = _definition(Second, Second, APP, priority=9)
+    first_alias = _definition(Plugin, First, APP, qualifier="first")
+    second_alias = _definition(Plugin, Second, APP, qualifier="second")
+    forwards: dict[ServiceKey, ServiceKey] = {
+        (Plugin, "first"): (First, None),
+        (Plugin, "second"): (Second, None),
+    }
+
+    ordered = emission_order([first_alias, second_alias, first, second], forwards)
+
+    assert [d.key for d in ordered] == [
+        (Second, None),
+        (Plugin, "second"),
+        (First, None),
+        (Plugin, "first"),
+    ]
+
+
+def test_a_forwarding_definition_whose_target_is_gone_comes_last() -> None:
+    first = _definition(First, First, APP)
+    orphan = _definition(Plugin, Second, APP, qualifier="orphan")
+
+    forwards: dict[ServiceKey, ServiceKey] = {(Plugin, "orphan"): (Second, None)}
+
+    ordered = emission_order([orphan, first], forwards)
+
+    assert [d.key for d in ordered] == [(First, None), (Plugin, "orphan")]
+
+
 async def test_the_emitted_order_is_the_collection_order() -> None:
     container = _compile(
         _definition(Plugin, Second, qualifier="b"),

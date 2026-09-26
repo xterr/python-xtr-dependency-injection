@@ -53,3 +53,26 @@ def test_an_alias_to_a_missing_target_is_refused() -> None:
 
     with pytest.raises(UnknownServiceError, match="set_alias"):
         _process(state)
+
+
+def test_a_forwarding_definition_is_recorded_against_its_target() -> None:
+    state = _state()
+    services = ServiceConfigurator(state, Origin("bundle", "beta"))
+    _ = services.set(Peer)
+    services.alias(Alpha, Peer, alias_qualifier="a")
+
+    _process(state)
+
+    assert state.forwards == {(Alpha, "a"): (Peer, None)}
+
+
+def test_an_alias_with_a_definition_of_its_own_is_not_a_forward() -> None:
+    state = _state()
+    services = ServiceConfigurator(state, Origin("bundle", "beta"))
+    _ = services.set(Peer)
+    _ = services.set(Alpha)
+    services.alias(Alpha, Peer)
+
+    _process(state)
+
+    assert state.forwards == {}

@@ -4,6 +4,11 @@ The engine has no aliases: every key it knows is a factory. So each alias
 becomes a factory definition under the alias key producing the target's own
 instance — one instance, reachable under both keys. The alias table stays, so
 the report can still say which keys forward to which definition.
+
+Each forwarding definition is also recorded in the build state's ``forwards``:
+emission puts it right after its target, so ``Sequence[Alias]`` and
+``Mapping[Hashable, Alias]`` follow the order ``priority``, ``before`` and
+``after`` gave the targets.
 """
 
 from __future__ import annotations
@@ -13,6 +18,7 @@ from typing import TYPE_CHECKING, final
 from xtr_dependency_injection.builder.definition import Definition, Origin
 from xtr_dependency_injection.exception import UnknownServiceError
 
+from ._state import state_of
 from .registration import _alias_factory
 
 if TYPE_CHECKING:
@@ -39,6 +45,7 @@ class ReplaceAliasByActualDefinitionPass:
         Raises:
             UnknownServiceError: If an alias target is not defined.
         """
+        forwards = state_of(builder).forwards
         for alias_key, target_key in builder.get_aliases().items():
             if builder.has_definition(*alias_key):
                 continue
@@ -56,3 +63,4 @@ class ReplaceAliasByActualDefinitionPass:
                     origin=Origin(target.origin.kind, target.origin.name, "alias"),
                 )
             )
+            forwards[alias_key] = target_key

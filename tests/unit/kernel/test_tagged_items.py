@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.fixtures.app_tagged_aliases import Pipeline
 from tests.fixtures.app_tagged_before import A as BeforeA
 from tests.fixtures.app_tagged_before import B as BeforeB
 from tests.fixtures.app_tagged_items import HighPriority, LowPriority
@@ -61,3 +62,13 @@ async def test_a_tagged_item_is_resolvable_by_its_type() -> None:
 
     assert isinstance(high, HighPriority)
     assert isinstance(low, LowPriority)
+
+
+async def test_a_collection_of_aliases_follows_the_tagged_order() -> None:
+    compiled = Kernel("tests.fixtures.app_tagged_aliases", bundles={}).build()
+
+    async with await compiled.boot() as booted:
+        pipeline = await booted.container.get(Pipeline)
+
+    assert pipeline.steps == ["Gamma", "Alpha", "Delta", "Beta"]
+    assert pipeline.indexes == ["gamma", "alpha", "delta", "beta"]

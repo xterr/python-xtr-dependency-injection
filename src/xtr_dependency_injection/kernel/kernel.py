@@ -440,7 +440,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
         given=given,
         environ=environ,
     )
-    ordered = emission_order(assembly.state.store.entries())
+    ordered = emission_order(assembly.state.store.entries(), assembly.state.forwards)
     injectables = emit_injectables(ordered, assembly.decorations, core.resetter.track)
     return Prepared(
         core=core,
