@@ -14,6 +14,9 @@ These mark parameters on any callable the kernel presents to the container
 
     async def warm(cache: Injected[Cache]) -> None: ...
 
+:class:`~xtr_dependency_injection.decorator.target.Target` picks a qualified
+service; it lives in its own module.
+
 ``Injected[T]`` marks a parameter as container-provided — the default
 autowiring, resolved by type. It is the alias
 :data:`Annotated[T, Autowire()] <Injected>`. Users never import wireup's
@@ -23,14 +26,16 @@ presented to the engine.
 
 from __future__ import annotations
 
-from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, TypeVar
+from types import UnionType
+from typing import TYPE_CHECKING, Annotated, TypeVar, cast, get_args, get_origin
+
+from .target import Target
 
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-__all__ = ["Autowire", "Injected", "Target"]
+__all__ = ["Autowire", "Injected", "is_container_supplied"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,20 +67,6 @@ class Autowire:
             raise ValueError(msg)
 
 
-@dataclass(frozen=True, slots=True)
-class Target:
-    """Point a container-provided parameter at a specific qualifier.
-
-    Names the qualifier the container should resolve for this parameter,
-    when several services of one type live under different qualifiers.
-
-    Attributes:
-        name: The qualifier of the service to inject.
-    """
-
-    name: Hashable
-
-
 T = TypeVar("T")
 
 Injected: TypeAlias = Annotated[T, Autowire()]
@@ -84,3 +75,34 @@ Injected: TypeAlias = Annotated[T, Autowire()]
 Alias of :data:`Annotated[T, Autowire()] <Autowire>` — the default
 autowiring, resolved by the parameter's type annotation.
 """
+
+
+def is_container_supplied(annotation: object) -> bool:
+    """Return whether the container fills a parameter annotated ``annotation``.
+
+    True for ``Injected[T]``, ``Annotated[T, Autowire(...)]`` and
+    ``Annotated[T, Target(...)]`` — also as a member of a union, such as
+    ``Injected[T] | None``. A library that calls a user's callable — a command, a
+    message handler — asks this to tell the parameters it passes itself from the
+    ones the container fills, so every such library agrees on what a marker is.
+    """
+    return any(_marks_injection(member) for member in _union_members(annotation))
+
+
+def _union_members(annotation: object) -> tuple[object, ...]:
+    """Return what ``annotation`` may be: its members if a union, else itself.
+
+    ``X | None`` has the origin ``UnionType``; ``Optional[X]`` has ``typing.Union``
+    until Python 3.14 makes them one — compared by name, as naming it is deprecated.
+    """
+    origin = get_origin(annotation)
+    if origin is UnionType or str(origin) == "typing.Union":
+        return cast("tuple[object, ...]", get_args(annotation))
+    return (annotation,)
+
+
+def _marks_injection(annotation: object) -> bool:
+    if get_origin(annotation) is not Annotated:
+        return False
+    metadata = cast("tuple[object, ...]", get_args(annotation))[1:]
+    return any(isinstance(entry, (Autowire, Target)) for entry in metadata)

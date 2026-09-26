@@ -706,6 +706,17 @@ async def warm(cache: Injected[Cache]) -> None:  # same as Annotated[Cache, Auto
     ...
 ```
 
+Each marker alone makes a parameter container-provided: `Injected[T]`, `Autowire(...)`,
+`Target(name)`. `Annotated[T, Autowire(), Target("smtp")]` means the same as
+`Annotated[T, Target("smtp")]`. `Target` beside `Autowire(param=...)` or `Autowire(env=...)`
+is refused with a `ValueError` — a parameter is a parameter, an environment variable, or a
+qualified service, never two of them.
+
+A library that calls a user's callable — a command, a message handler — tells the parameters
+it passes itself from the ones the container fills with `is_container_supplied(annotation)`,
+true for every marker above, also inside a union such as `Injected[T] | None`. Asking it,
+rather than looking for one marker, keeps every library in step with the container.
+
 ### `ServiceLocator`
 
 A lazy `Mapping[Hashable, T]` (a `ServiceCollectionInterface`) that builds each entry only

@@ -22,7 +22,8 @@ from wireup.ioc.registry import _function_get_unwrapped_return_type
 from wireup.ioc.type_analysis import analyze_type
 
 from xtr_dependency_injection.config.env_placeholder import env_parameter
-from xtr_dependency_injection.decorator.autowire import Autowire, Target
+from xtr_dependency_injection.decorator.autowire import Autowire
+from xtr_dependency_injection.decorator.target import Target
 
 if TYPE_CHECKING:
     import inspect
@@ -117,6 +118,7 @@ def _rewrite_annotation(annotation: object) -> object | None:
     if get_origin(annotation) is not Annotated:
         return None
     wrapped, *metadata = cast("tuple[object, ...]", get_args(annotation))
+    metadata = _merge_target(metadata)
     new_metadata: list[object] = []
     changed = False
     for entry in metadata:
@@ -130,6 +132,31 @@ def _rewrite_annotation(annotation: object) -> object | None:
         return None
     annotated: Any = Annotated
     return cast("object", annotated[(wrapped, *new_metadata)])
+
+
+def _merge_target(metadata: list[object]) -> list[object]:
+    """Let ``Target(q)`` carry the injection when a plain ``Autowire()`` sits beside it.
+
+    ``Annotated[T, Autowire(), Target("q")]`` means one thing — the service ``T``
+    qualified ``q`` — so it becomes one engine marker, not two the engine refuses.
+
+    Raises:
+        ValueError: If ``Target`` sits beside ``Autowire(param=...)`` or
+            ``Autowire(env=...)``: a parameter is injected from a parameter, from the
+            environment, or as a qualified service — never two of them.
+    """
+    targets = [entry for entry in metadata if isinstance(entry, Target)]
+    autowires = [entry for entry in metadata if isinstance(entry, Autowire)]
+    if not targets or not autowires:
+        return metadata
+    if any(entry.param is not None or entry.env is not None for entry in autowires):
+        msg = (
+            "Target(...) cannot be combined with Autowire(param=...) or Autowire(env=...): "
+            "a parameter is injected from a parameter, from the environment, or as a "
+            "qualified service"
+        )
+        raise ValueError(msg)
+    return [entry for entry in metadata if not isinstance(entry, Autowire)]
 
 
 def parameter_injections(signature: inspect.Signature) -> tuple[str, ...]:

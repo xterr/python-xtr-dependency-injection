@@ -31,7 +31,7 @@ ALLOWED: dict[str, set[str]] = {
         "compiler._wireup_bridge",
         "config.env_placeholder",
     },
-    "compiler": {"exception", "decorator.autowire", "config.env_placeholder"},
+    "compiler": {"exception", "decorator.autowire", "decorator.target", "config.env_placeholder"},
     "diagnostics": {"exception", "builder.definition"},
     "parameter_bag": {"exception", "config._walk", "config.env_placeholder"},
 }

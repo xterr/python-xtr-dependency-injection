@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Annotated, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, TypeAlias, cast, get_args, get_origin
 
 import pytest
 import wireup
@@ -14,7 +14,12 @@ from wireup.ioc.types import (
 )
 
 from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
-from xtr_dependency_injection.decorator.autowire import Autowire, Injected, Target
+from xtr_dependency_injection.decorator.autowire import (
+    Autowire,
+    Injected,
+    is_container_supplied,
+)
+from xtr_dependency_injection.decorator.target import Target
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -102,15 +107,58 @@ def test_unrelated_metadata_is_preserved_alongside_a_translated_marker() -> None
     assert isinstance(metadata[1], ConfigInjectionRequest)
 
 
-def test_autowire_and_target_are_hashable_frozen_dataclasses() -> None:
+def test_autowire_is_a_hashable_frozen_dataclass() -> None:
     assert Autowire() == Autowire()
     assert Autowire(param="x") == Autowire(param="x")
-    assert Target("smtp") == Target("smtp")
-    assert Target("smtp") != Target("http")
-    _ = {Autowire(), Target("smtp")}
+    _ = {Autowire(), Autowire(env="PORT")}
 
 
-def test_target_requires_a_name() -> None:
-    with pytest.raises(TypeError):
-        # Runtime call — the missing argument is what this test proves.
-        _ = cast("Callable[[], Target]", Target)()
+def test_autowire_beside_target_becomes_one_qualified_injection() -> None:
+    def target(mailer: Annotated[object, Autowire(), Target("smtp")]) -> object:
+        return _echo(mailer)
+
+    metadata = _rewritten_metadata(target, "mailer")
+
+    assert len(metadata) == 1
+    assert isinstance(metadata[0], InjectableQualifier)
+    assert metadata[0].qualifier == "smtp"
+
+
+@pytest.mark.parametrize("marker", [Autowire(param="kernel.name"), Autowire(env="MAILER")])
+def test_target_beside_a_parameter_or_variable_injection_is_refused(marker: Autowire) -> None:
+    signature = inspect.Signature(
+        [
+            inspect.Parameter(
+                "mailer",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=Annotated[object, marker, Target("smtp")],
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _ = to_engine_signature(signature)
+
+
+OptionalInjected: TypeAlias = Injected[int] | None
+OptionalTargeted: TypeAlias = Annotated[int, Target("smtp")] | None
+MARKED: list[object] = [
+    Injected[int],
+    Annotated[int, Autowire(param="kernel.name")],
+    Annotated[int, Autowire(env="PORT")],
+    Annotated[int, Target("smtp")],
+    Annotated[int, "other", Target("smtp")],
+    OptionalInjected,
+    OptionalTargeted,
+]
+UNMARKED: list[object] = [int, int | None, Annotated[int, "other"], "Injected[int]"]
+
+
+@pytest.mark.parametrize("annotation", MARKED)
+def test_a_marked_parameter_is_container_supplied(annotation: object) -> None:
+    assert is_container_supplied(annotation)
+
+
+@pytest.mark.parametrize("annotation", UNMARKED)
+def test_an_unmarked_parameter_is_not_container_supplied(annotation: object) -> None:
+    assert not is_container_supplied(annotation)

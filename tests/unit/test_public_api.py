@@ -55,6 +55,7 @@ PUBLIC = {
     "Injected",
     "OnInvalid",
     "Target",
+    "is_container_supplied",
     "bind_callable",
     "bundle_active",
     "qualified_name",

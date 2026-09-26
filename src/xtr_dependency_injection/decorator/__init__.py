@@ -14,11 +14,12 @@ from .autoconfigure import (
     autoconfigure_tag,
     autoconfigure_tags_of,
 )
-from .autowire import Autowire, Injected, Target
+from .autowire import Autowire, Injected, is_container_supplied
 from .compiler_pass import compiler_pass
 from .exclude import exclude
 from .lifecycle import on_boot, on_shutdown
 from .remove_if_missing import remove_if_missing
+from .target import Target
 from .when import when, when_not
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "autoconfigure_tags_of",
     "compiler_pass",
     "exclude",
+    "is_container_supplied",
     "on_boot",
     "on_shutdown",
     "remove_if_missing",
