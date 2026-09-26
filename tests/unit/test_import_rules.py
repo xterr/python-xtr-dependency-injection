@@ -21,40 +21,72 @@ ALLOWED: dict[str, set[str]] = {
         "diagnostics",
         "builder.definition",
         "builder.on_invalid",
-        "builder.pass_stage",
+        "compiler.compiler_pass_interface",
+        "compiler.pass_stage",
     },
     "bundle": {"exception", "diagnostics"},
-    "runtime": {"exception", "builder.definition", "compiler._wireup_bridge"},
-    "compiler": {"exception", "decorator.autowire"},
+    "runtime": {
+        "exception",
+        "builder.definition",
+        "compiler._wireup_bridge",
+        "config.env_placeholder",
+    },
+    "compiler": {"exception", "decorator.autowire", "config.env_placeholder"},
     "diagnostics": {"exception", "builder.definition"},
+    "parameter_bag": {"exception", "config._walk", "config.env_placeholder"},
 }
 ABOVE_EVERYTHING = {"integration", "kernel", "testing"}
 
-# The built-in compiler passes live under compiler/ (relocated from
-# kernel/passes/). Only these modules may reach into builder/ and decorator/;
-# each set is the module's complete import contract beyond compiler/ itself,
-# and none may import wireup. Every other compiler module keeps ALLOWED above.
-COMPILER_PASS_MODULES: dict[str, set[str]] = {
-    f"{PACKAGE}.compiler.decorator_service_pass": {
+# The compiler passes, the pass config and the compiler live under compiler/.
+# Only these modules may reach into builder/, bundle/, config/, decorator/ and
+# scan/; each set is the module's complete runtime import contract beyond
+# compiler/ itself, and none may import wireup. Every other compiler module
+# keeps ALLOWED above.
+_PASS_MODULE_IMPORTS: dict[str, set[str]] = {
+    "attribute_autoconfiguration_pass": {"builder._origins", "builder.definition"},
+    "autowire_as_decorator_pass": {
+        "builder._origins",
         "builder.definition",
         "decorator.as_decorator",
-        "exception",
     },
-    f"{PACKAGE}.compiler.remove_missing_dependencies_pass": {
-        "decorator.remove_if_missing",
-    },
-    f"{PACKAGE}.compiler.check_alias_validity_pass": {
+    "check_alias_validity_pass": {"exception"},
+    "check_definition_validity_pass": {
         "builder.definition",
+        "config.env_placeholder",
         "exception",
     },
-    f"{PACKAGE}.compiler.register_autoconfigure_attributes_pass": {
+    "register_env_var_processors_pass": {"builder.definition", "exception", "runtime"},
+    "validate_env_placeholders_pass": {"config.env_placeholder", "exception"},
+    "resolve_parameter_placeholders_pass": set(),
+    "compiler": {"builder._origins", "bundle", "exception"},
+    "decorator_service_pass": {"builder.definition", "decorator.as_decorator", "exception"},
+    "merge_extension_configuration_pass": {
+        "builder._origins",
+        "builder.conflict_policy",
+        "builder.container_builder",
+        "builder.definition",
+        "builder.service_configurator",
+        "bundle",
+        "config.config_resolver",
+        "decorator.as_alias",
+        "decorator.as_service",
+        "decorator.as_tagged_item",
+        "decorator.remove_if_missing",
+        "scan.scanner",
+    },
+    "register_autoconfigure_attributes_pass": {
         "builder.autoconfigure_rule",
         "decorator.autoconfigure",
         "exception",
     },
-    f"{PACKAGE}.compiler.resolve_instanceof_conditionals_pass": {
-        "exception",
-    },
+    "remove_missing_dependencies_pass": {"decorator.remove_if_missing", "exception"},
+    "replace_alias_by_actual_definition_pass": {"builder.definition", "exception"},
+    "resettable_service_pass": {"exception"},
+    "resolve_instanceof_conditionals_pass": {"exception"},
+    "resolve_references_to_aliases_pass": {"exception"},
+}
+COMPILER_PASS_MODULES: dict[str, set[str]] = {
+    f"{PACKAGE}.compiler.{name}": imports for name, imports in _PASS_MODULE_IMPORTS.items()
 }
 
 
@@ -169,7 +201,7 @@ def test_each_layer_imports_only_what_is_below_it(module: str, path: Path) -> No
 
 
 @pytest.mark.parametrize("module", sorted(COMPILER_PASS_MODULES))
-def test_the_relocated_compiler_passes_never_import_wireup(module: str) -> None:
+def test_the_compiler_passes_never_import_wireup(module: str) -> None:
     path = next(p for m, p in MODULES if m == module)
     wireup = {
         target

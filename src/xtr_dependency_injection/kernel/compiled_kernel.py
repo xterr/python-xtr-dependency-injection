@@ -33,7 +33,7 @@ class CompiledKernel:
     before the application starts; ``lifespan`` then boots and shuts down
     around the application's life. Framework integrations that need the
     engine container use ``engine_container(compiled)`` from
-    ``xtr_dependency_injection.integration.wireup`` (todo 23).
+    ``xtr_dependency_injection.integration.wireup``.
     """
 
     __slots__ = (

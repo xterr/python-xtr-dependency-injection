@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, cast
 
 import wireup
 
-from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
+from xtr_dependency_injection.compiler._wireup_bridge import (
+    parameter_injections,
+    to_engine_signature,
+)
 from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.exception._signatures import evaluated_signature
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
@@ -76,10 +79,15 @@ def bind_callable(
         msg = "bind_callable needs a kernel-provided container"
         raise TypeError(msg)
     engine = container._engine()  # noqa: SLF001 — the binder owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
-    presented = to_engine_signature(signature if signature is not None else _signature_of(target))
+    declared = signature if signature is not None else _signature_of(target)
+    presented = to_engine_signature(declared)
+    resolved_names = parameter_injections(declared)
     is_class = isinstance(target, type)
 
     async def entry(*args: object, **kwargs: object) -> object:
+        for name in resolved_names:
+            if name in kwargs:
+                kwargs[name] = await container.resolve_env_placeholders(kwargs[name])
         call: Callable[..., object]
         if is_class:
             source = _scope.get() if per_call_scope else engine

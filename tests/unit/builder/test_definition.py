@@ -29,3 +29,14 @@ def test_a_definition_defaults_to_no_priority_and_no_decoration() -> None:
     assert definition.priority is None
     assert (definition.tags, definition.decorates) == ({}, None)
     assert (definition.before, definition.after) == ((), ())
+
+
+def test_arguments_are_set_one_by_one_or_replaced_together() -> None:
+    definition = Definition((Sample, None), Sample, "class", "singleton", Origin("app", "tests"))
+
+    chained = definition.set_argument("host", "a").set_argument("port", 1)
+    assert chained is definition
+    assert definition.get_arguments() == {"host": "a", "port": 1}
+
+    _ = definition.set_arguments({"user": "u"})
+    assert definition.get_arguments() == {"user": "u"}

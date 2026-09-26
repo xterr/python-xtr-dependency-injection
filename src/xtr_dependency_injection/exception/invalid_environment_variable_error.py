@@ -13,16 +13,24 @@ __all__ = ["InvalidEnvironmentVariableError"]
 
 
 class InvalidEnvironmentVariableError(DependencyInjectionError):
-    """``env()`` could not convert a variable's value; the cast's error is ``__cause__``."""
+    """A processor or cast refused a variable's value; a cast's own error is ``__cause__``.
+
+    Attributes:
+        name: The variable, or the expression being processed.
+        cast: The processor prefix (``"int"``, ``"json"``…) or the callable
+            that refused it.
+        value: The value refused. Kept out of the message, which is logged:
+            the variable may hold a secret.
+    """
 
     name: str
-    cast: Callable[[str], object]
+    cast: str | Callable[..., object]
     value: str
 
-    def __init__(self, name: str, cast: Callable[[str], object], value: str) -> None:
+    def __init__(self, name: str, cast: str | Callable[..., object], value: str) -> None:
         """Record the variable, the conversion, and the value that failed it."""
         self.name = name
         self.cast = cast
         self.value = value
-        converter = getattr(cast, "__name__", repr(cast))
-        super().__init__(f"environment variable {name}={value!r} is not a valid {converter}")
+        converter = cast if isinstance(cast, str) else getattr(cast, "__name__", repr(cast))
+        super().__init__(f"environment variable {name} is not a valid {converter}")

@@ -1,81 +1,110 @@
 from __future__ import annotations
 
+from enum import Enum
+from typing import TYPE_CHECKING
+
 import pytest
 
 from xtr_dependency_injection.config import env
+from xtr_dependency_injection.config.env_placeholder import EnvPlaceholder
 from xtr_dependency_injection.exception import (
     InvalidEnvironmentVariableError,
     MissingEnvironmentVariableError,
 )
+from xtr_dependency_injection.runtime.env_var_processor import EnvVarProcessor
+from xtr_dependency_injection.runtime.env_var_processors_locator import EnvVarProcessorsLocator
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
-def test_a_set_variable_is_read_as_a_string(monkeypatch: pytest.MonkeyPatch) -> None:
+class Suit(Enum):
+    HEARTS = "hearts"
+
+
+def _read(value: object, **environ: str) -> object:
+    assert isinstance(value, EnvPlaceholder)
+    processor = EnvVarProcessor(environ)
+    locator = EnvVarProcessorsLocator(dict.fromkeys(processor.get_provided_types(), processor))
+    return value.resolve(locator.get_env)
+
+
+def test_env_returns_a_placeholder_not_a_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XTR_TEST_DSN", "sync://")
 
-    assert env("XTR_TEST_DSN") == "sync://"
+    placeholder = env("XTR_TEST_DSN")
+
+    assert isinstance(placeholder, EnvPlaceholder)
+    assert repr(placeholder) == "env(XTR_TEST_DSN)"
+    assert placeholder != "sync://"
 
 
-def test_a_variable_is_converted_by_cast(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XTR_TEST_PORT", "8080")
-
-    assert env("XTR_TEST_PORT", int) == 8080
+def test_a_placeholder_resolves_to_the_variable() -> None:
+    assert _read(env("DSN"), DSN="sync://") == "sync://"
 
 
-def test_an_unset_variable_returns_the_default_unconverted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("XTR_TEST_PORT", raising=False)
+@pytest.mark.parametrize(
+    ("converter", "expression", "value", "expected"),
+    [
+        (int, "int:PORT", "8080", 8080),
+        (float, "float:PORT", "1.5", 1.5),
+        (bool, "bool:PORT", "yes", True),
+        (str, "PORT", "80", "80"),
+        (Suit, f"enum:{__name__}.Suit:PORT", "hearts", Suit.HEARTS),
+    ],
+    ids=["int", "float", "bool", "str", "enum"],
+)
+def test_a_cast_becomes_the_prefix_it_stands_for(
+    converter: Callable[[str], object], expression: str, value: str, expected: object
+) -> None:
+    placeholder = env("PORT", converter)
 
-    assert env("XTR_TEST_PORT", int, default=None) is None
-
-
-def test_an_unset_variable_without_default_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("XTR_TEST_DSN", raising=False)
-
-    with pytest.raises(MissingEnvironmentVariableError):
-        _ = env("XTR_TEST_DSN")
-
-
-def test_a_value_the_cast_refuses_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XTR_TEST_PORT", "eighty")
-
-    with pytest.raises(InvalidEnvironmentVariableError) as caught:
-        _ = env("XTR_TEST_PORT", int)
-
-    assert isinstance(caught.value.__cause__, ValueError)
-
-
-@pytest.mark.parametrize("raw", ["1", "true", "YES", "On"])
-def test_bool_reads_truthy_words(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
-    monkeypatch.setenv("XTR_TEST_FLAG", raw)
-
-    assert env("XTR_TEST_FLAG", bool) is True
+    assert isinstance(placeholder, EnvPlaceholder)
+    assert placeholder.expression == expression
+    assert _read(placeholder, PORT=value) == expected
 
 
-@pytest.mark.parametrize("raw", ["0", "false", "No", "OFF", ""])
-def test_bool_reads_falsy_words(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
-    monkeypatch.setenv("XTR_TEST_FLAG", raw)
+def test_a_prefix_chain_is_kept_as_written() -> None:
+    placeholder = env("json:SETTINGS")
 
-    assert env("XTR_TEST_FLAG", bool) is False
-
-
-def test_bool_refuses_anything_else(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XTR_TEST_FLAG", "maybe")
-
-    with pytest.raises(InvalidEnvironmentVariableError):
-        _ = env("XTR_TEST_FLAG", bool)
+    assert isinstance(placeholder, EnvPlaceholder)
+    assert placeholder.expression == "json:SETTINGS"
+    assert _read(placeholder, SETTINGS='{"a": 1}') == {"a": 1}
 
 
-def test_string_default_yields_a_str_or_none_typed_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The typed assignment below is what basedpyright validates for todo 24."""
-    monkeypatch.delenv("XTR_TEST_MISSING", raising=False)
+def test_any_other_callable_is_applied_to_the_value() -> None:
+    def upper(value: str) -> str:
+        return value.upper()
 
-    value: str | None = env("XTR_TEST_MISSING", default=None)
+    placeholder = env("NAME", upper)
 
-    assert value is None
+    assert _read(placeholder, NAME="acme") == "ACME"
 
 
-def test_cast_default_yields_a_typed_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("XTR_TEST_MISSING", raising=False)
+def test_an_unset_variable_returns_the_default_unconverted() -> None:
+    assert _read(env("PORT", int, default=None)) is None
 
-    value: int | None = env("XTR_TEST_MISSING", int, default=None)
 
-    assert value is None
+def test_the_default_is_what_a_numeric_placeholder_holds_while_building() -> None:
+    placeholder = env("PORT", int, default=8080)
+
+    assert isinstance(placeholder, int)
+    assert placeholder + 0 == 8080
+
+
+def test_an_unset_variable_without_default_is_refused() -> None:
+    with pytest.raises(MissingEnvironmentVariableError, match="PORT"):
+        _ = _read(env("PORT", int))
+
+
+def test_a_value_the_cast_refuses_is_refused() -> None:
+    with pytest.raises(InvalidEnvironmentVariableError, match="PORT"):
+        _ = _read(env("PORT", int), PORT="eighty")
+
+
+def test_a_callable_refusing_the_value_is_refused() -> None:
+    def strict(value: str) -> int:
+        return int(value)
+
+    with pytest.raises(InvalidEnvironmentVariableError, match="NAME"):
+        _ = _read(env("NAME", strict), NAME="x")

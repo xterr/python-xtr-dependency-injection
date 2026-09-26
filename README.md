@@ -220,12 +220,13 @@ class MailBundle(Bundle[MailConfig]):
         services: ServiceConfigurator,
         builder: ContainerBuilder,
     ) -> None:
-        def mailer(config: MailConfig) -> Mailer:
-            return Mailer(host=config.host)
-
-        _ = services.set(mailer)
+        _ = services.set(Mailer).set_argument("host", config.host)
         services.alias(MailerInterface, Mailer)
 ```
+
+A bundle hands its config to a service with `set_argument(name, value)`: the value stays on the
+definition, `debug:container` shows it, and an `env()` placeholder or `%name%` reference in it
+is resolved when the service is built. A factory injecting the config type works too.
 
 `@as_bundle(name, *, config=NoConfig, resources=())`:
 
@@ -239,10 +240,10 @@ The hooks, all optional, run in dependency order:
 
 | Hook | Runs during | Purpose |
 |---|---|---|
-| `build(builder)` | step 4 | Compile-time wiring: compiler passes, autoconfiguration, kernel parameters |
-| `prepend_extension(builder)` | step 5 (prepend) | Adjust other bundles' configs, using `builder.prepend_extension_config` |
-| `load_extension(config, services, builder)` | step 6 (load) | Define services with `services.set` / `services.instance` / `services.alias` / `services.load` |
-| `process(builder)` | step 10 | See and adjust every definition after every bundle has loaded |
+| `build(builder)` | prepare | Compile-time wiring: compiler passes, autoconfiguration, kernel parameters |
+| `prepend_extension(builder)` | merge pass | Adjust other bundles' configs, using `builder.prepend_extension_config` |
+| `load_extension(config, services, builder)` | merge pass | Define services with `services.set` / `services.instance` / `services.alias` / `services.load` |
+| `process(builder)` | `BEFORE_OPTIMIZATION`, -10000 | See and adjust every definition after every bundle has loaded — a bundle overriding it is a compiler pass |
 | `async boot()` | after compile | Async I/O and handler binding — `self.container` is set |
 | `async shutdown()` | reverse order | Async cleanup — `self.container` is still set |
 
@@ -296,7 +297,7 @@ Each bundle's config resolves in one deterministic order, and every step is reco
 1. the default, `MailConfig()`;
 2. the application's base provider — one under `@when`/`@when_not` wins over an
    unconditional one;
-3. `alias_of` forwards (see below), in bundle order;
+3. an `alias_of` forward (see below) — at most one per config;
 4. other bundles' prepends, in bundle order (so they add to what the application chose);
 5. the application's transforms — unconditional, then conditional; by `priority`, then scan
    order.
@@ -317,9 +318,10 @@ type. An unknown name / type is an error; an env-disabled target is skipped and 
 ### `AliasOf` — forwarding a config key
 
 A bundle whose config exposes a field `Annotated[C | None, AliasOf("target")]` forwards its
-non-`None` value to bundle `target`.
-Configs then resolve in bundle topological order extended by owner → target edges. A conflict
-with an app base provider raises `ConflictingConfigProvidersError` naming both sources.
+non-`None` value to bundle `target`. The owner's config resolves before its target's, whatever
+the bundle order; an alias loop is a `CircularBundleDependencyError`. A forward conflicting
+with an app base provider, or with another bundle's forward, raises
+`ConflictingConfigProvidersError` naming both sources.
 
 ```python
 from typing import Annotated
@@ -352,21 +354,88 @@ class Site:
         self.name = name
 ```
 
-### `env()`
+A string anywhere in a bundle config or a parameter may **reference a parameter** between
+percent signs. Configs are resolved before their bundle loads, parameters by
+`ResolveParameterPlaceHoldersPass`:
 
-`env(name, cast=str, *, default=...)` reads the environment while the kernel builds. It is
-overloaded so the return type follows `cast` and `default`: `env("PORT", int)` is `int`,
-`env("PORT", int, default=None)` is `int | None`, and `env("HOST")` is `str`. `bool` is the
-one `cast` not applied as `bool(value)` (which is truthy for every non-empty string): it
-reads `1/true/yes/on` for true and `0/false/no/off` or empty for false, case-insensitively.
+| Written | Becomes |
+|---|---|
+| `"%kernel.project_dir%"` | the parameter's own value, whatever its type |
+| `"%kernel.project_dir%/var/log"` | the value embedded — only a string or a number can be |
+| `"100%%"` | `100%` |
+| `"%env(int:PORT)%"` | the placeholder `env("int:PORT")` (see below) |
 
 ```python
-value: str | None = env("SMTP_PASSWORD", default=None)
-port: int = env("SMTP_PORT", int, default=25)
+@dataclass(frozen=True)
+class MailConfig:
+    spool: str = "%kernel.project_dir%/var/spool"
+    password: str = "%env(MAIL_PASSWORD)%"
 ```
 
-Missing without a default raises `MissingEnvironmentVariableError`; a bad cast (including a
-`bool` value that is neither true nor false) raises `InvalidEnvironmentVariableError`.
+An unknown name is a `ParameterNotFoundError`, a loop a `ParameterCircularReferenceError`,
+a mapping embedded in a string an `InvalidParameterTypeError`. While building,
+`builder.get_parameter_bag()` returns the parameters as an `EnvPlaceholderParameterBag`
+(`get`, `has`, `set`, `resolve_value`, `escape_value`, `unescape_value`, ...); at runtime a
+service injects `ContainerBagInterface` to read the compiled ones.
+
+### Environment variables: `env()`
+
+`env()` never reads a value: it returns a **placeholder**, and the variable is read when a
+service needing it is built. The container compiles without the environment it will run in,
+a service nobody builds never reads its variables, and no report prints a secret — a
+placeholder renders as `env(SMTP_PASSWORD)`.
+
+```python
+@configure
+def mail(config: MailConfig) -> MailConfig:
+    return replace(
+        config,
+        host=env("SMTP_HOST"),
+        port=env("SMTP_PORT", int, default=25),
+        dsn=f"smtp://{env('SMTP_HOST')}:{env('SMTP_PORT', int)}",
+        options=env("json:file:SMTP_OPTIONS_FILE"),
+    )
+```
+
+Two spellings, one mechanism. `env("PORT", int)` is typed: `int`, `float`, `bool`, `str`
+and an `Enum` class become the processor prefix they stand for, and any other callable is
+applied to the value. `env("json:file:SECRETS")` is a processor chain, read right to left.
+`"%env(...)%"` in a string is the same placeholder. `default=` is returned when the variable
+is unset, and is the value a numeric placeholder carries while the kernel builds, so a
+config's own validation still runs.
+
+The value is resolved where it is injected: a config when a service asks for it (a resolved
+copy, validated again), a parameter through `Autowire(param=...)`, a constructor, factory
+or hook parameter annotated `Annotated[int, Autowire(env="int:PORT")]`, a definition argument
+set with `set_argument`, and what a factory registered in `load_extension` closes over or
+defaults to — a factory reading `config.host` gets the variable's value. A factory reaching a
+placeholder through something else — another function, or an object such as the bundle
+itself — fails the build with an `InvalidDefinitionError` pointing at `set_argument`. A
+placeholder cannot
+decide what the container contains: testing one in an `if` while the kernel builds raises
+`EnvPlaceholderError`. A missing variable fails when the service needing it is built, as a
+`ServiceResolutionError` caused by `MissingEnvironmentVariableError`.
+
+| Prefix | Value |
+|---|---|
+| *(none)* / `string` | the raw string |
+| `bool` / `not` | `1/true/yes/on` or a non-zero number is true; `not` negates |
+| `int` / `float` | a number; anything else is an error |
+| `trim` / `urlencode` / `base64` | stripped / percent-encoded / decoded |
+| `json` / `csv` | an object, array or null / a list |
+| `url` / `query_string` | a dict of the URL's parts / of the query |
+| `file` | the content of the file the variable names |
+| `key:K:` / `enum:C:` / `const:` | item `K` / member of enum `C` / the named constant |
+| `default:P:` | what follows, or parameter `P` when unset or empty |
+| `defined` / `resolve` / `shuffle` | set and not empty / `%param%` and `%env(X)%` replaced / shuffled list |
+
+Variables are read from the process environment — or from `Kernel(environ={...})`, which
+gives one kernel its own — then from every **loader**: a service implementing
+`EnvVarLoaderInterface` (`load_env_vars() -> Mapping[str, str]`) is autoconfigured and asked
+for what the environment lacks, once until `kernel.reset`. A service implementing
+`EnvVarProcessorInterface` (`get_env(prefix, name, get_env)`, `get_provided_types()`) adds
+prefixes, or replaces built-in ones. Load `.env` files into the environment with
+[xtr-dotenv](../xtr-dotenv) at the entry point, before the kernel is built.
 
 ## Scanning and autoconfiguration
 
@@ -423,7 +492,8 @@ called once per concrete built class and returns the attribute mapping; `factory
 matched class definition into a factory definition.
 
 A bundle can scan a module only when a peer is active: `services.load("pkg.commands")` in
-`load_extension` runs after every bundle has loaded (the late scan).
+`load_extension` runs after every bundle has loaded (the late scan). A late scan may not declare `@configure`, `@parameters` or `@compiler_pass`: each is needed
+before bundles load, so put it in an early resource.
 
 ## Definitions and compiler passes
 
@@ -439,11 +509,12 @@ A bundle can scan a module only when a peer is active: `services.load("pkg.comma
 | `remove_definition(service, qualifier=)` | Drop a definition |
 | `get_definitions()` | All definitions |
 | `set_alias(alias, target, *, alias_qualifier=, target_qualifier=)` | Point one key at another |
-| `get_alias / has_alias / remove_alias` | Read / test / drop an alias |
+| `get_aliases / get_alias / has_alias / remove_alias` | Read all / read / test / drop an alias |
 | `has(service, qualifier=)` | Definition or alias present |
 | `find_tagged_service_ids(tag)` | Every definition carrying a tag |
 | `get_parameter / has_parameter / set_parameter` | Read / test / write a parameter |
-| `add_compiler_pass(fn, *, stage=, priority=)` | Register a compiler pass at a stage |
+| `add_compiler_pass(compiler_pass, *, stage=, priority=)` | Register a `CompilerPassInterface` at a stage (only in `build`) |
+| `get_compiler()` / `log(compiler_pass, message)` | The compiler (its `PassConfig` and log) / add to its log |
 | `register_for_autoconfiguration(type)` | Nominal autoconfiguration rule by base type |
 | `register_attribute_for_autoconfiguration(reader, callback)` | Marker-based autoconfiguration |
 | `prepend_extension_config(bundle, transform)` | Transform another bundle's config |
@@ -457,31 +528,67 @@ Inside `load_extension`, a bundle registers services on the `ServiceConfigurator
 - `services.load("some.module", another_module)` — late scan
 
 Every `Definition` is mutable and carries: `key`, `provider`, `kind` (`"class"` / `"factory"`
-/ `"instance"`), `lifetime`, `origin`, `tags`, `decorates`, `priority`, `before`, `after`.
-Methods on it: `add_tag(name, **attributes)`, `has_tag(name)`, `get_tag(name)`,
-`clear_tag(name)`, `set_decorated_service(target, *, qualifier=, priority=, on_invalid=)`.
+/ `"instance"`), `lifetime`, `origin`, `tags`, `decorates`, `priority`, `before`, `after`,
+`arguments`. Methods on it: `add_tag(name, **attributes)`, `has_tag(name)`, `get_tag(name)`,
+`clear_tag(name)`, `set_decorated_service(target, *, qualifier=, priority=, on_invalid=)`,
+`set_argument(name, value)`, `set_arguments(mapping)`, `get_arguments()`.
 
-### `PassStage`
+An argument is given to the provider's parameter by name instead of injecting it; it must
+name a parameter taken by keyword (or the provider takes `**kwargs`), an instance takes none,
+and a decorator's argument cannot be its decorated service — `CheckDefinitionValidityPass`
+fails the build otherwise. `ResolveParameterPlaceHoldersPass` resolves `%name%` references in
+arguments, and `ValidateEnvPlaceholdersPass` checks their placeholders.
 
-Compiler passes run in five stages, priority descending within a stage:
+### Compiler passes and `PassStage`
+
+A compiler pass implements `CompilerPassInterface` — one `process(builder)` method. The
+application declares one with `@compiler_pass` on a class the kernel builds with no
+arguments; a bundle adds instances with `builder.add_compiler_pass(...)` from `build`; a
+bundle overriding `process` is itself a pass.
 
 ```python
-from xtr_dependency_injection import PassStage, compiler_pass
+from xtr_dependency_injection import ContainerBuilder, PassStage, compiler_pass
 
 
 @compiler_pass(stage=PassStage.BEFORE_REMOVING, priority=10)
-def drop_optional_debug_services(builder: ContainerBuilder) -> None: ...
+class DropOptionalDebugServices:
+    def process(self, builder: ContainerBuilder) -> None: ...
 ```
 
-The stages are: `BEFORE_OPTIMIZATION`, `OPTIMIZE`, `BEFORE_REMOVING`, `REMOVE`,
-`AFTER_REMOVING`. Built-in passes: `OPTIMIZE` resolves decorations; `BEFORE_REMOVING` runs
-`remove_if_missing`; `AFTER_REMOVING` validates aliases.
+The `PassConfig` runs the merge pass first — every bundle's `prepend_extension`, the configs
+(their `%name%` references resolved), every `load_extension`, the late scan and the marked
+definitions — then the five stages in
+order: `BEFORE_OPTIMIZATION`, `OPTIMIZE`, `BEFORE_REMOVING`, `REMOVE`, `AFTER_REMOVING`.
+Within a stage passes run by priority, highest first, and by registration order within a
+priority: the built-in ones first, then bundle passes in bundle order, then the application's
+in scan order.
+
+| Stage | Priority | Pass | Does |
+|---|---|---|---|
+| `BEFORE_OPTIMIZATION` | 100 | `RegisterAutoconfigureAttributesPass` | `@autoconfigure` / `@autoconfigure_tag` markers become rules |
+| | 100 | `AutowireAsDecoratorPass` | Scanned `@as_decorator` become decorating definitions |
+| | 100 | `AttributeAutoconfigurationPass` | Runs `register_attribute_for_autoconfiguration` callbacks |
+| | 100 | `ResolveInstanceofConditionalsPass` | Applies the autoconfiguration rules |
+| | 100 | `RegisterEnvVarProcessorsPass` | Registers the environment variable processors and loaders |
+| | 100 | `RemoveMissingDependenciesPass` | Drops `@remove_if_missing` services whose peer is absent |
+| | -32 | `ResettableServicePass` (kernel bundle) | Checks every `kernel.reset` names an existing method |
+| | -10000 | every bundle overriding `process` | Bundle order |
+| `OPTIMIZE` | 0 | `ResolveParameterPlaceHoldersPass` | Resolves `%name%` references in the parameters and definition arguments |
+| | 0 | `ValidateEnvPlaceholdersPass` | Refuses an unknown prefix, or a non-scalar placeholder embedded in a string |
+| | 0 | `DecoratorServicePass` | Resolves decorations by priority, applies `on_invalid` |
+| | 0 | `CheckDefinitionValidityPass` | Checks kind, provider, key, lifetime and arguments agree; refuses a placeholder a factory could only reach unresolved |
+| | 0 | `ResolveReferencesToAliasesPass` | Points alias chains at their definition; refuses loops |
+| `BEFORE_REMOVING` | 0 | `CheckAliasValidityPass` (kernel bundle) | Checks an alias target class implements the alias |
+| `REMOVE` | 0 | `ReplaceAliasByActualDefinitionPass` | Gives every alias a forwarding definition; refuses a missing target |
+
+Passes log through `builder.log(pass, message)`; `builder.get_compiler().get_log()` reads it.
 
 ### `@remove_if_missing`
 
 Drops a service when a peer it needs is absent. A service tagged this way (tag name
-`container.remove_if_missing`) is dropped by the built-in `BEFORE_REMOVING` pass when any of
-its conditions is unmet:
+`container.remove_if_missing`) is dropped by the built-in `RemoveMissingDependenciesPass`
+(`BEFORE_OPTIMIZATION`, 100) when any of its conditions is unmet — so a decorator of it follows
+its `on_invalid`, and every alias of it goes too:
 
 ```python
 from xtr_dependency_injection import as_service, remove_if_missing
@@ -638,14 +745,15 @@ result = await bound(message)
 ```
 build()     environment → bundles → early scan → build() of every bundle →
             configs (default → app base → alias_of → prepends → app transforms) →
-            load_extension → late scan → app-marked definitions → autoconfigure →
+            load_extension → late scan → app-marked definitions (the merge pass) →
             compiler passes by stage → compile
 boot()      bundle.boot() in order → @on_boot (priority, then scan order)
 shutdown()  @on_shutdown → bundle.shutdown() in reverse → container.close()
 ```
 
 Hooks are injected: `Injected[...]` parameters are filled, sync or async. A boot that fails
-shuts down what already booted and closes the container; a `BaseException` (including
+shuts down the bundles that already booted, in reverse, and closes the container —
+`@on_shutdown` hooks run only after a boot that succeeded; a `BaseException` (including
 `KeyboardInterrupt`) triggers the same rollback and propagates. Shutdown runs every step even
 if one fails, and raises the failures together as an `ExceptionGroup`. A generator factory's
 cleanup runs as the container closes; put cleanup that must survive an error in `finally`,
@@ -657,8 +765,9 @@ Reset between messages. The core bundle calls
 `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")`,
 so any service explicitly inheriting `ResetInterface` (from `xtr-service-contracts`) is reset
 by `ServicesResetter` between messages. A service opts in explicitly with
-`services.set(X).add_tag("kernel.reset", method="clear")`; only *built* services are tracked
-and reset.
+`services.set(X).add_tag("kernel.reset", method="clear")` — the `method` is required, and
+`ResettableServicePass` fails the build when the service has no such method; only *built*
+services are tracked and reset.
 
 ```python
 from xtr_service_contracts import ResetInterface
@@ -731,18 +840,23 @@ bundle exposes them as `debug:bundles`, `debug:config` and `debug:container`.
 ## Plain wireup — `integration.wireup`
 
 The module `xtr_dependency_injection.integration.wireup` is the **only** engine-facing public
-module. It exports two helpers:
+module. It exports three helpers:
 
-- one that runs the same pipeline the kernel does — bundle requirements, configs, load,
-  autoconfigure, process — without scanning an application package, and returns the list of
-  wireup service items to spread into `wireup.create_async_container(services=[...])`;
+- `injectables(bundles, *, configs=, env=, scan=)` runs the same pipeline the kernel does —
+  bundle requirements, configs, load, autoconfigure, process — without scanning an application
+  package, and returns the wireup injectables to spread into
+  `wireup.create_async_container(injectables=[...])`. wireup's `config=` stays the caller's,
+  so a bundle or `@parameters` producing parameters is refused;
+- `create_container(bundles, *, configs=, env=, scan=, parameters=, environ=)` compiles the
+  same injectables together with every parameter — the kernel's, the bundles', `@parameters`',
+  the caller's `parameters`, and what `Autowire(env=...)` reads — into a
+  `wireup.AsyncContainer`;
 - `engine_container(kernel)`, which unwraps a compiled or booted kernel down to its
   `wireup.AsyncContainer` for framework integrations such as
   `wireup.integration.fastapi.setup(engine_container(compiled), app)`.
 
 Bundle *classes* are listed (not instances); every listed class is active (`{"all": True}`
-semantics), and required peers are pulled in recursively. Boot hooks do not run, and
-parameters need the kernel — wireup's `config=` stays the caller's.
+semantics), and required peers are pulled in recursively. Boot hooks do not run.
 
 Everywhere else, the public API stays behind `ContainerInterface`.
 
@@ -756,7 +870,8 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 | Bundle config | A typed config class buildable with no arguments; `__post_init__` validates | Configuration is Python, not files |
 | Application config | `@configure` functions | Provide or transform a bundle's config |
 | Environment gate | `@when("prod")` / `@when_not("prod")` | Skip a scanned object outside its environment |
-| Parameters | `@parameters` / `env("X", int, default=...)` | Named values injected by key |
+| Parameters | `@parameters`, `%name%` references, `ContainerBagInterface` | Named values injected by key |
+| Environment variables | `env("X", int, default=...)`, `"%env(X)%"`, `Autowire(env=...)`, `EnvVarProcessorInterface`, `EnvVarLoaderInterface` | Read when the service needing them is built |
 | Config forwarding | `Annotated[C \| None, AliasOf("target")]` | Send a config field to another bundle |
 | Scanning | The kernel scan + `services.load(...)` | Discover services under a package |
 | Nominal autoconfiguration | `builder.register_for_autoconfiguration(T)` | Tag every subclass of `T` |
@@ -766,7 +881,7 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 | Aliasing | `@as_alias(alias, *, qualifier=)` | One type reachable under another |
 | Tagged ordering | `@as_tagged_item(index=, priority=, before=, after=)` | Deterministic collection order |
 | Compiler pass stages | `PassStage.BEFORE_OPTIMIZATION / OPTIMIZE / BEFORE_REMOVING / REMOVE / AFTER_REMOVING` | Five stages, priority-ordered within each |
-| Compiler passes | `Bundle.process(builder)` + `@compiler_pass(stage=, priority=)` | See and adjust every definition |
+| Compiler passes | `CompilerPassInterface`, `Bundle.process(builder)` + `@compiler_pass(stage=, priority=)` on a class | See and adjust every definition |
 | Conditional removal | `@remove_if_missing(service= / class_= / package=)` | Drop a service when a peer is absent |
 | Decoration | `@as_decorator(T, priority=, on_invalid=OnInvalid.*)` + `Annotated[T, AutowireDecorated()]` | Wrap a service and receive the original |
 | Parameter and target injection | `Autowire(param=...)` / `Target(name)` | Inject a parameter, or select a qualified service |
@@ -791,8 +906,10 @@ Everywhere else, the public API stays behind `ContainerInterface`.
   its type plus an optional `Target` qualifier.
 - **`@as_alias` is unconditional and every service is reachable**: gate a definition with
   `@when` / `@when_not` on the class instead of asking the alias to condition itself.
-- **`env(name, bool)`** reads `1/true/yes/on` and `0/false/no/off` case-insensitively, so
-  `env("DEBUG", bool)` on `"0"` is `False`, not truthy.
+- **`env(name, bool)`** reads `1/true/yes/on` or a non-zero number as true, anything else as
+  false, so `env("DEBUG", bool)` on `"0"` is `False`, not truthy.
+- **Environment variables are read when needed**, not while building: a missing one fails the
+  service that needs it, on first use.
 - **`container.get()` returns singletons directly**; a `lifetime="scoped"` / `"transient"`
   service must be resolved inside a scope. An unknown dependency is reported as a guided
   build error naming the service and the missing type, not an engine stack trace.
@@ -822,9 +939,13 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `UnknownConfigTypeError` | No active bundle owns a configured type |
 | `ConflictingConfigProvidersError` | Two base providers, or an app base and an `alias_of`, in one group |
 | `ParameterConflictError` | A parameter set twice |
-| `MissingEnvironmentVariableError` / `InvalidEnvironmentVariableError` | `env()` |
+| `MissingEnvironmentVariableError` / `InvalidEnvironmentVariableError` | A variable a service needs is unset / a processor or cast refuses its value |
+| `EnvPlaceholderError` | A placeholder used as a value while building, an unknown prefix, a non-scalar embedded in a string, a lazy parameter read raw |
+| `ParameterCircularReferenceError` / `InvalidParameterTypeError` | `%name%` references loop / a non-scalar embedded in a string |
 | `DuplicateServiceError` | Two bundles, or two application definitions, claim one key |
 | `UnknownServiceError` | `set_definition` / `remove_definition` / `decorate` / `alias` target nothing |
+| `InvalidDefinitionError` | A definition's provider does not match its kind or key, an unknown lifetime, a `kernel.reset` without a usable `method`, a bad `remove_if_missing` tag, an alias target class not implementing the alias, an argument that does not fit its provider, a factory reaching a placeholder it would receive unresolved |
+| `ServiceCircularReferenceError` | An alias chain loops back on itself |
 | `DecoratorSignatureError` | A decorator without exactly one `Annotated[T, AutowireDecorated()]` parameter of the decorated type |
 | `ServiceOrderError` | `@as_tagged_item` `before` / `after` contradict a priority or cycle |
 | `ContainerCompilationError` | The engine failed to compile the container |
@@ -845,6 +966,11 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 - **Annotations must be importable at runtime** wherever wireup or the kernel reads them —
   not under `TYPE_CHECKING`.
 - **No entry-point bundle discovery** and no `bundles:sync` command.
+- **Environment placeholders are process-wide.** A placeholder stands for its expression, not
+  for a kernel: every kernel reads it through its own processors, and the process keeps one
+  placeholder per distinct `env()` expression.
+- **Numbers and strings stand in for their placeholder while building**: validation sees the
+  `default`, else `0` or the token.
 
 ## Development
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
@@ -79,6 +79,10 @@ class Definition:
         before: Types this definition must precede in tagged collections
             (consumed by :func:`sort_with_priorities`).
         after: Types this definition must follow in tagged collections.
+        arguments: Values for the provider's parameters, by name, given
+            instead of injecting them. A value may hold an ``env()``
+            placeholder or a ``%name%`` reference: it is resolved when the
+            service is built.
     """
 
     key: ServiceKey
@@ -91,6 +95,26 @@ class Definition:
     decorates: Decorates | None = None
     before: tuple[type, ...] = ()
     after: tuple[type, ...] = ()
+    arguments: dict[str, object] = field(default_factory=dict)
+
+    def set_argument(self, name: str, value: object, /) -> Definition:
+        """Give the provider's parameter ``name`` the value ``value`` instead of injecting it.
+
+        This is how a bundle hands its config to a service: the value stays
+        on the definition, so an ``env()`` placeholder in it is resolved when
+        the service is built, and the report shows it.
+        """
+        self.arguments[name] = value
+        return self
+
+    def set_arguments(self, arguments: Mapping[str, object], /) -> Definition:
+        """Replace every argument by ``arguments``."""
+        self.arguments = dict(arguments)
+        return self
+
+    def get_arguments(self) -> dict[str, object]:
+        """Return the arguments, by parameter name."""
+        return dict(self.arguments)
 
     def add_tag(self, name: str, /, **attributes: object) -> Definition:
         """Add a tag ``name`` with the given attribute mapping.

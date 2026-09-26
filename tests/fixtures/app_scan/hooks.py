@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from xtr_dependency_injection.config.configure import configure
 from xtr_dependency_injection.config.parameters import parameters
 from xtr_dependency_injection.decorator.as_decorator import AutowireDecorated, as_decorator
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass
 from xtr_dependency_injection.decorator.lifecycle import on_boot, on_shutdown
+
+if TYPE_CHECKING:
+    from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 
 
 class Target:
@@ -24,8 +27,9 @@ def provided() -> dict[str, object]:
 
 
 @compiler_pass
-def adjusted(_builder: object) -> None:
-    pass
+class Adjusted:
+    def process(self, builder: ContainerBuilder) -> None:
+        del builder
 
 
 @on_boot

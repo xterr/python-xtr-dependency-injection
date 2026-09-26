@@ -7,6 +7,7 @@ These mark parameters on any callable the kernel presents to the container
     def __init__(
         self,
         env: Annotated[str, Autowire(param="kernel.environment")],
+        port: Annotated[int, Autowire(env="int:SMTP_PORT")],
         smtp: Annotated[Mailer, Target("smtp")],
     ) -> None: ...
 
@@ -34,18 +35,31 @@ __all__ = ["Autowire", "Injected", "Target"]
 
 @dataclass(frozen=True, slots=True)
 class Autowire:
-    """Mark a parameter as container-provided; :attr:`param` names a parameter to inject.
+    """Mark a parameter as container-provided — by type, by parameter, or from the environment.
 
-    Without :attr:`param`, the parameter is resolved by its type, like
-    :data:`Injected`; with :attr:`param`, the named dotted parameter (such
-    as ``kernel.name`` or ``kernel.environment``) is injected instead.
+    Without :attr:`param` or :attr:`env`, the parameter is resolved by its
+    type, like :data:`Injected`. With :attr:`param`, the named dotted
+    parameter (such as ``kernel.name``) is injected, any environment
+    placeholder in it resolved. With :attr:`env`, the environment variable
+    expression (``"int:PORT"``, ``"json:file:SECRETS"``) is read when the
+    service is built, through the container's processors.
 
     Attributes:
-        param: A dotted parameter name to inject, or ``None`` to resolve by
-            type.
+        param: A dotted parameter name to inject.
+        env: An environment variable expression to inject.
+
+    Raises:
+        ValueError: If both :attr:`param` and :attr:`env` are given.
     """
 
     param: str | None = None
+    env: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse naming both a parameter and an environment variable."""
+        if self.param is not None and self.env is not None:
+            msg = "Autowire takes param= or env=, not both"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)

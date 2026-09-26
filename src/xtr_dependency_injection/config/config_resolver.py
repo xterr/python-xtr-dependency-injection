@@ -5,10 +5,11 @@ For every active bundle, in order:
 1. its config type's default, ``C()``;
 2. the application's base provider, if any — one conditional on the
    environment beats an unconditional one;
-3. other bundles' prepends (recorded via
+3. ``AliasOf`` forwards from other bundles, whose configs resolve first;
+4. other bundles' prepends (recorded via
    ``builder.prepend_extension_config`` from ``Bundle.prepend_extension``),
    in call order;
-4. the application's transforms — unconditional, then conditional; within
+5. the application's transforms — unconditional, then conditional; within
    each, by priority, highest first, then in scan order.
 
 Every step is recorded, so ``debug:config`` shows where a value came from.
@@ -16,6 +17,7 @@ Every step is recorded, so ``debug:config`` shows where a value came from.
 
 from __future__ import annotations
 
+import heapq
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
@@ -66,12 +68,11 @@ class _Step:
     apply: Callable[[object], object]
 
 
-def resolve_configs(  # noqa: PLR0913 — one call configures every step of the resolution.
+def resolve_configs(
     *,
     bundles: Sequence[AnyBundle],
     providers: Sequence[ScannedObject],
     inactive: Mapping[type, str],
-    env: str,
     given: Sequence[object] = (),
     prepends: Sequence[Prepend] = (),
 ) -> ResolvedConfigs:
@@ -82,7 +83,6 @@ def resolve_configs(  # noqa: PLR0913 — one call configures every step of the 
         providers: The ``@configure`` functions the early scan found.
         inactive: Config types of bundles that are not active, by type, for
             a clearer error.
-        env: The environment being built.
         given: Config values acting as unconditional base providers — how
             standalone ``injectables()`` receives its configs.
         prepends: What bundles recorded via ``prepend_extension``.
@@ -94,9 +94,6 @@ def resolve_configs(  # noqa: PLR0913 — one call configures every step of the 
             providers.
         ConfigProviderError: If a provider or prepend returns the wrong type.
     """
-    del (
-        env
-    )  # kept for API compatibility (env-conditional prepends run via @when on prepend_extension)
     owned = {type(bundle).metadata().config: type(bundle).metadata().name for bundle in bundles}
     active_by_name = {type(bundle).metadata().name: bundle for bundle in bundles}
     parsed = [
@@ -108,11 +105,10 @@ def resolve_configs(  # noqa: PLR0913 — one call configures every step of the 
         _ = _owner(type(value), _STANDALONE, owned, inactive)
     resolved_prepends = _resolve_prepends(prepends, owned)
     alias_edges, skipped_aliases = _resolve_alias_edges(bundles, active_by_name)
-    _check_alias_cycles(bundles, alias_edges)
     values: dict[str, object] = {}
-    reports: list[ConfigReport] = []
+    reports: dict[str, ConfigReport] = {}
     pending_alias: dict[str, list[_Step]] = {}
-    for bundle in bundles:
+    for bundle in _resolution_order(bundles, alias_edges):
         metadata = type(bundle).metadata()
         config_type = metadata.config
         alias_steps = pending_alias.pop(metadata.name, [])
@@ -132,7 +128,9 @@ def resolve_configs(  # noqa: PLR0913 — one call configures every step of the 
         for step in steps:
             value = step.apply(value)
         values[metadata.name] = value
-        reports.append(ConfigReport(metadata.name, value, ("default", *(s.label for s in steps))))
+        reports[metadata.name] = ConfigReport(
+            metadata.name, value, ("default", *(s.label for s in steps))
+        )
         if config_type is not NoConfig:
             _queue_alias_forwards(
                 owner=metadata.name,
@@ -151,7 +149,8 @@ def resolve_configs(  # noqa: PLR0913 — one call configures every step of the 
         ),
         *skipped_aliases,
     )
-    return ResolvedConfigs(values, tuple(reports), skipped)
+    ordered = tuple(reports[type(bundle).metadata().name] for bundle in bundles)
+    return ResolvedConfigs(values, ordered, skipped)
 
 
 def _owner(
@@ -196,6 +195,10 @@ def _steps(  # noqa: PLR0913, PLR0917 — one call assembles every ordered step 
 ) -> list[_Step]:
     """Return the steps resolving ``bundle``'s config, in the order they apply."""
     steps = _base(config_type, providers, given)
+    if len(alias_steps) > 1:
+        raise ConflictingConfigProvidersError(
+            config_type, tuple(step.label for step in alias_steps)
+        )
     if steps and alias_steps:
         base_label = steps[0].label.removeprefix("base ")
         raise ConflictingConfigProvidersError(config_type, (base_label, alias_steps[0].label))
@@ -280,25 +283,51 @@ def _resolve_alias_edges(
     return tuple(edges), tuple(skipped)
 
 
-def _check_alias_cycles(
+def _resolution_order(
     bundles: Sequence[AnyBundle], edges: Sequence[tuple[str, str, str, type]]
-) -> None:
-    """Raise ``CircularBundleDependencyError`` if any alias edge contradicts bundle order.
+) -> list[AnyBundle]:
+    """Return ``bundles`` reordered so every alias owner resolves before its target.
 
-    Owner must resolve before target. When the bundle order — already
-    topological over required edges — places the owner after the target, no
-    ordering satisfies both constraints, so the alias closes a cycle.
+    A bundle's config does not depend on the bundles it requires, only on the
+    bundles forwarding into it, so the bundle order is kept wherever an alias
+    edge does not ask otherwise: among the bundles ready to resolve, the one
+    earliest in bundle order goes first.
+
+    Raises:
+        CircularBundleDependencyError: If the alias edges loop, a bundle
+            aliasing to itself included.
     """
-    positions = {type(bundle).metadata().name: index for index, bundle in enumerate(bundles)}
-    for owner, target, field, _ in edges:
-        if positions[owner] > positions[target]:
-            raise CircularBundleDependencyError(
-                (target, owner, target),
-            )
-        # A self-alias is also a cycle: an owner cannot forward to itself.
-        if owner == target:
-            raise CircularBundleDependencyError((owner, owner))
-        del field
+    names = [type(bundle).metadata().name for bundle in bundles]
+    position = {name: index for index, name in enumerate(names)}
+    owners: dict[str, set[str]] = {name: set() for name in names}
+    for owner, target, _, _ in edges:
+        owners[target].add(owner)
+    order: list[AnyBundle] = []
+    ready = [index for index, name in enumerate(names) if not owners[name]]
+    heapq.heapify(ready)
+    waiting = {name: len(forwarders) for name, forwarders in owners.items()}
+    while ready:
+        index = heapq.heappop(ready)
+        order.append(bundles[index])
+        for owner, target, _, _ in edges:
+            if owner == names[index]:
+                waiting[target] -= 1
+                if waiting[target] == 0:
+                    heapq.heappush(ready, position[target])
+    if len(order) < len(bundles):
+        stuck = {name for name, count in waiting.items() if count > 0}
+        raise CircularBundleDependencyError(_alias_cycle(owners, stuck))
+    return order
+
+
+def _alias_cycle(owners: Mapping[str, set[str]], stuck: set[str]) -> tuple[str, ...]:
+    """Return one alias loop among ``stuck``, its first bundle repeated at the end."""
+    path: list[str] = []
+    name = min(stuck)
+    while name not in path:
+        path.append(name)
+        name = min(owner for owner in owners[name] if owner in stuck)
+    return (*path[path.index(name) :], name)
 
 
 def _queue_alias_forwards(

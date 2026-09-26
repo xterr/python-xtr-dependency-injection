@@ -160,18 +160,19 @@ class Note:
 
 
 @compiler_pass
-def note_the_mailer(builder: ContainerBuilder) -> None:
-    (mailer,) = [d for d in builder.get_definitions() if d.key[0] is Mailer]
-    note = Note(f"mailer from {mailer.origin.kind}")
-    _ = builder.set_definition(
-        Definition(
-            key=(Note, None),
-            provider=note,
-            kind="instance",
-            lifetime="singleton",
-            origin=Origin("app", "acme_app.services:note_the_mailer"),
+class NoteTheMailer:
+    def process(self, builder: ContainerBuilder) -> None:
+        (mailer,) = [d for d in builder.get_definitions() if d.key[0] is Mailer]
+        note = Note(f"mailer from {mailer.origin.kind}")
+        _ = builder.set_definition(
+            Definition(
+                key=(Note, None),
+                provider=note,
+                kind="instance",
+                lifetime="singleton",
+                origin=Origin("app", "acme_app.services:NoteTheMailer"),
+            )
         )
-    )
 """
 
 APP_HOOKS = """

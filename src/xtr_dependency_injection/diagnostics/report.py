@@ -83,6 +83,8 @@ class DefinitionReport:
         tags: The names of every tag added to the definition, in add order.
         aliases: The alias keys forwarding to this definition, as rendered
             service names.
+        arguments: ``name=value`` for every argument the definition gives
+            its provider; a placeholder renders as ``env(NAME)``.
     """
 
     key: ServiceKey
@@ -94,6 +96,7 @@ class DefinitionReport:
     decorated_by: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
+    arguments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +170,7 @@ class KernelReport:
                 ", ".join(definition.decorated_by) or "-",
                 ", ".join(definition.tags) or "-",
                 ", ".join(definition.aliases) or "-",
+                ", ".join(definition.arguments) or "-",
             )
             for definition in self.definitions
         ]
@@ -180,6 +184,7 @@ class KernelReport:
             "Decorated by",
             "Tags",
             "Aliases",
+            "Arguments",
         )
         return _titled("Definitions", _table(headers, rows))
 

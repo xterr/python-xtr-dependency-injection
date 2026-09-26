@@ -2,9 +2,10 @@
 
 Put on a class or interface, they say: every definition whose built type has
 this class in its ``__mro__`` (itself included) gets the described tags and,
-if the marker asks for it, the described lifetime and factory. The kernel's
-autoconfigure step reads the markers off scanned candidates and applies them
-alongside the ``register_for_autoconfiguration`` rules.
+if the marker asks for it, the described lifetime and factory.
+``RegisterAutoconfigureAttributesPass`` reads the markers off scanned
+candidates into rules that ``ResolveInstanceofConditionalsPass`` applies
+alongside the ``register_for_autoconfiguration`` ones.
 """
 
 from __future__ import annotations
@@ -84,8 +85,8 @@ def autoconfigure(
 ) -> Callable[[T], T]:
     """Record a class-level autoconfiguration rule.
 
-    The decorator only records the rule on the class' own namespace — the
-    kernel's autoconfigure step consumes it.
+    The decorator only records the rule on the class' own namespace —
+    ``RegisterAutoconfigureAttributesPass`` consumes it.
     """
     marker = AutoconfigureMarker(tags=tuple(tags), lifetime=lifetime, factory=factory)
 

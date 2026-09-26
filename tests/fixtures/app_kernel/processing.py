@@ -17,17 +17,18 @@ class Marker:
 
 
 @compiler_pass
-def add_marker(builder: ContainerBuilder) -> None:
-    marker = Marker(f"echo defined: {builder.has(Echo)}")
-    _ = builder.set_definition(
-        Definition(
-            key=(Marker, None),
-            provider=marker,
-            kind="instance",
-            lifetime="singleton",
-            origin=Origin("app", "tests.fixtures.app_kernel.processing:add_marker"),
+class AddMarker:
+    def process(self, builder: ContainerBuilder) -> None:
+        marker = Marker(f"echo defined: {builder.has(Echo)}")
+        _ = builder.set_definition(
+            Definition(
+                key=(Marker, None),
+                provider=marker,
+                kind="instance",
+                lifetime="singleton",
+                origin=Origin("app", "tests.fixtures.app_kernel.processing:AddMarker"),
+            )
         )
-    )
 
 
 @as_decorator(Echo)

@@ -129,7 +129,7 @@ def test_load_records_a_late_scan_for_the_bundle() -> None:
     assert state.late_scans == [("alpha", ("pkg.commands",))]
 
 
-@pytest.mark.parametrize("phase", ["autoconfigure", "process"])
+@pytest.mark.parametrize("phase", ["build", "process"])
 def test_load_belongs_to_the_load_phase(phase: Phase) -> None:
     state = _state()
     state.phase = phase
@@ -140,9 +140,9 @@ def test_load_belongs_to_the_load_phase(phase: Phase) -> None:
     assert (caught.value.operation, caught.value.phase) == ("load", phase)
 
 
-def test_defining_is_allowed_while_autoconfiguring() -> None:
+def test_defining_is_allowed_while_the_passes_run() -> None:
     state = _state()
-    state.phase = "autoconfigure"
+    state.phase = "process"
 
     _ = _services(state).set(Mailer)
 

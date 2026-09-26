@@ -59,7 +59,7 @@ class EchoBundle(Bundle[EchoConfig]):
     def load_extension(
         self, config: EchoConfig, services: ServiceConfigurator, builder: ContainerBuilder
     ) -> None:
-        _ = services.set(echo).add_tag("kernel.reset")
+        _ = services.set(echo).add_tag("kernel.reset", method="reset")
         builder.set_parameter("echo.greeting", config.greeting)
         builder.register_attribute_for_autoconfiguration(tags_of, register_tagged)
 

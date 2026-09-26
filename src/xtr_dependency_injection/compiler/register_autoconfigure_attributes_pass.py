@@ -1,16 +1,16 @@
-"""Reading ``@autoconfigure`` / ``@autoconfigure_tag`` markers off scanned classes.
+"""Reading ``@autoconfigure`` / ``@autoconfigure_tag`` markers off scanned classes into rules.
 
-The pass reads the ``@autoconfigure`` / ``@autoconfigure_tag`` markers a
-class declares and turns them into autoconfiguration rules. Each scanned
-class carrying either marker becomes one :class:`AutoconfigureRule` (keyed
-on the class itself), which :mod:`resolve_instanceof_conditionals_pass`
-then applies to definitions.
+Each scanned class carrying either marker becomes one
+:class:`AutoconfigureRule` keyed on the class itself, appended after the rules
+bundles registered with ``register_for_autoconfiguration``;
+:class:`~xtr_dependency_injection.compiler.resolve_instanceof_conditionals_pass.ResolveInstanceofConditionalsPass`
+then applies both to the definitions.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, cast, final
 
 from xtr_dependency_injection.builder.autoconfigure_rule import AutoconfigureRule
 from xtr_dependency_injection.decorator.autoconfigure import (
@@ -20,54 +20,59 @@ from xtr_dependency_injection.decorator.autoconfigure import (
 )
 from xtr_dependency_injection.exception._naming import qualified_name
 
+from ._state import state_of
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 
-    from xtr_dependency_injection.scan.scanned_object import ScannedObject
-
-__all__ = ["CALLABLE_ATTRS", "collect_marker_rules"]
+__all__ = ["CALLABLE_ATTRS", "RegisterAutoconfigureAttributesPass"]
 
 CALLABLE_ATTRS: Final = "__xtr_autoconfigure_callable__"
-"""Sentinel key under which a deferred tag-attribute callable is stashed.
+"""Key under which a tag-attribute callable is stashed until the built class is known.
 
-Written by :func:`collect_marker_rules` and read by the
-``resolve_instanceof_conditionals_pass`` when it applies a rule, so the two
-share one spelling.
+Written here and read by ``ResolveInstanceofConditionalsPass`` when it applies
+a rule, so the two share one spelling.
 """
 
 
-def collect_marker_rules(
-    candidates: Sequence[ScannedObject],
-) -> dict[type, tuple[AutoconfigureMarker, AutoconfigureRule]]:
-    """Return a rule per scanned class carrying ``@autoconfigure`` or ``@autoconfigure_tag``."""
-    collected: dict[type, tuple[AutoconfigureMarker, AutoconfigureRule]] = {}
-    for candidate in candidates:
-        obj = candidate.obj
-        if not isinstance(obj, type):
-            continue
-        marker = autoconfigure_of(obj)
-        tag_markers = autoconfigure_tags_of(obj)
-        if marker is None and not tag_markers:
-            continue
-        rule = AutoconfigureRule(type_=obj)
-        effective = marker if marker is not None else AutoconfigureMarker()
-        if effective.lifetime is not None:
-            rule.lifetime = effective.lifetime
-        for entry in effective.tags:
-            if isinstance(entry, str):
-                rule.tags.setdefault(entry, []).append({})
-            else:
-                tag_name, attrs = entry
-                rule.tags.setdefault(tag_name, []).append(_as_tag_attrs(attrs))
-        for tm in tag_markers:
-            name = tm.name if tm.name is not None else qualified_name(obj)
-            rule.tags.setdefault(name, []).append(dict(tm.attributes))
-        collected[obj] = (effective, rule)
-    return collected
+@final
+class RegisterAutoconfigureAttributesPass:
+    """Turns the autoconfiguration markers of every scanned class into a rule for it."""
+
+    __slots__ = ()
+
+    def process(self, builder: ContainerBuilder) -> None:
+        """Append a rule for every scanned class carrying ``@autoconfigure`` or a tag marker."""
+        state = state_of(builder)
+        for candidate in state.candidates:
+            rule = _rule_for(candidate.obj)
+            if rule is not None:
+                state.autoconfigure_rules.append(rule)
+
+
+def _rule_for(obj: object) -> AutoconfigureRule | None:
+    if not isinstance(obj, type):
+        return None
+    marker = autoconfigure_of(obj)
+    tag_markers = autoconfigure_tags_of(obj)
+    if marker is None and not tag_markers:
+        return None
+    effective = marker if marker is not None else AutoconfigureMarker()
+    rule = AutoconfigureRule(type_=obj, lifetime=effective.lifetime, factory=effective.factory)
+    for entry in effective.tags:
+        if isinstance(entry, str):
+            _ = rule.add_tag(entry)
+        else:
+            tag_name, attrs = entry
+            rule.tags.setdefault(tag_name, []).append(_as_tag_attrs(attrs))
+    for tag_marker in tag_markers:
+        name = tag_marker.name if tag_marker.name is not None else qualified_name(obj)
+        _ = rule.add_tag(name, **tag_marker.attributes)
+    return rule
 
 
 def _as_tag_attrs(attrs: object) -> dict[str, object]:
-    """Normalize a tag-attribute value into a dict, deferring callables via a sentinel."""
+    """Normalize a tag-attribute value into a dict, deferring a callable under a sentinel."""
     if callable(attrs) and not isinstance(attrs, Mapping):
         return {CALLABLE_ATTRS: attrs}
     return dict(cast("Mapping[str, object]", attrs))

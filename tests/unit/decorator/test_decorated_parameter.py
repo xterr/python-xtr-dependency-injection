@@ -111,3 +111,13 @@ def test_a_nullable_string_nested_in_annotated_reports_allows_none() -> None:
 
     assert parameter.name == "inner"
     assert parameter.allows_none is True
+
+
+class PositionalTracing:
+    def __init__(self, inner: Annotated[Bus, AutowireDecorated()], /) -> None:
+        self.inner: Bus = inner
+
+
+def test_a_positional_only_autowire_decorated_parameter_is_refused() -> None:
+    with pytest.raises(DecoratorSignatureError, match="positional-only"):
+        _ = decorated_parameter_of(PositionalTracing, Bus)

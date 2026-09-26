@@ -3,7 +3,8 @@
 Use it only for framework integrations (for example
 ``wireup.integration.fastapi.setup(engine_container(compiled), app)``) or for
 plain-wireup applications that want to reuse the bundle pipeline without a
-kernel.
+kernel: :func:`injectables` for the services alone, :func:`create_container`
+for a container with its parameters too.
 
 Every other public surface stays behind :class:`ContainerInterface`.
 """
@@ -13,6 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from xtr_dependency_injection.compiler.wireup_compiler import compile_container
+from xtr_dependency_injection.config.env_placeholder import ENV_PARAMETERS_ROOT, env_tokens
+from xtr_dependency_injection.config.parameters import merge_parameters
 from xtr_dependency_injection.exception import ConfigProviderError
 from xtr_dependency_injection.kernel.booted_kernel import BootedKernel
 from xtr_dependency_injection.kernel.compiled_kernel import CompiledKernel
@@ -20,14 +24,16 @@ from xtr_dependency_injection.kernel.kernel import prepare
 from xtr_dependency_injection.scan.default_excludes import DEFAULT_EXCLUDES
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from types import ModuleType
 
     from wireup import AsyncContainer
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
 
-__all__ = ["engine_container", "injectables"]
+__all__ = ["create_container", "engine_container", "injectables"]
+
+_NEEDS_PARAMETERS = "parameters need create_container() or the kernel, not wireup's config="
 
 
 def injectables(
@@ -66,7 +72,7 @@ def injectables(
             bundle.
         ConfigProviderError: If a bundle or scanned resource produces
             parameters: wireup's ``config=`` is the caller's, so parameters
-            need the kernel.
+            need :func:`create_container` or the kernel.
     """
     listed = {bundle_type: {"all": True} for bundle_type in bundles}
     prepared = prepare(
@@ -80,15 +86,76 @@ def injectables(
         given=configs,
     )
     state = prepared.assembly.state
-    sources = [str(origin) for origin, _ in state.parameters if origin.kind != "kernel"]
-    sources.extend(scanned.name for scanned in prepared.assembly.parameter_providers)
+    sources = [
+        origin.name if origin.kind == "app" else str(origin)
+        for origin, _ in state.parameters
+        if origin.kind != "kernel"
+    ]
     if sources:
         raise ConfigProviderError(
             ", ".join(sources),
-            "parameters need the kernel: injectables() leaves wireup's config= to the caller",
+            _NEEDS_PARAMETERS,
         )
     _ = prepared.finish_report()
     return prepared.injectables
+
+
+def create_container(  # noqa: PLR0913 — the pipeline's inputs, plus the caller's parameters.
+    bundles: Sequence[type[AnyBundle]],
+    /,
+    *,
+    configs: Sequence[object] = (),
+    env: str = "prod",
+    scan: Sequence[str | ModuleType] = (),
+    parameters: Mapping[str, object] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> AsyncContainer:
+    """Return a wireup container for ``bundles``, compiled as the kernel compiles one.
+
+    What :func:`injectables` returns, compiled together with the parameters
+    — the kernel's, the bundles', ``@parameters``' and those
+    ``Autowire(env=...)`` reads — so parameter and environment variable
+    injections work without a kernel. Boot and shutdown hooks do not run.
+
+    Args:
+        bundles: As for :func:`injectables`.
+        configs: As for :func:`injectables`.
+        env: As for :func:`injectables`.
+        scan: As for :func:`injectables`.
+        parameters: The caller's own parameters, merged with the others.
+        environ: Where environment variables are read, instead of the
+            process environment.
+
+    Raises:
+        ParameterConflictError: If ``parameters`` sets a parameter another
+            source sets.
+        ContainerCompilationError: If the engine refuses the container.
+    """
+    listed = {bundle_type: {"all": True} for bundle_type in bundles}
+    prepared = prepare(
+        name="standalone",
+        environment=env,
+        debug=False,
+        project_dir=Path.cwd(),
+        listed=listed,
+        resources=scan,
+        exclude=DEFAULT_EXCLUDES,
+        given=configs,
+        environ=environ,
+    )
+    sources = [
+        (origin.name if origin.kind == "app" else str(origin), values)
+        for origin, values in prepared.assembly.state.parameters
+    ]
+    if parameters is not None:
+        sources.append(("create_container(parameters=...)", parameters))
+    merged = merge_parameters(sources)
+    merged[ENV_PARAMETERS_ROOT] = env_tokens()
+    container = compile_container(
+        prepared.injectables, prepared.ordered, parameters=merged, concurrent_scoped_access=False
+    )
+    _ = prepared.finish_report()
+    return container
 
 
 def engine_container(kernel: CompiledKernel | BootedKernel, /) -> AsyncContainer:

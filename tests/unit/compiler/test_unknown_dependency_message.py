@@ -91,3 +91,29 @@ def test_the_kernel_surfaces_the_reworded_message_with_cause_and_origin() -> Non
     assert "mark it @as_service" in message
     assert isinstance(caught.value.__cause__, WireupError)
     assert any("is defined by" in note for note in caught.value.__notes__)
+
+
+def test_an_unrelated_class_of_the_same_name_is_not_noted() -> None:
+    other = type("Widget", (), {"__module__": "elsewhere"})
+
+    @as_bundle("same_name")
+    class SameNameBundle(Bundle):
+        @override
+        def load_extension(
+            self,
+            config: object,
+            services: ServiceConfigurator,
+            builder: ContainerBuilder,
+        ) -> None:
+            del config, builder
+            _ = services.set(Widget)
+            _ = services.instance(other())
+
+    kernel = Kernel(APP, resources=(), bundles={SameNameBundle: {"all": True}})
+
+    with pytest.raises(ContainerCompilationError) as caught:
+        _ = kernel.build()
+
+    notes = caught.value.__notes__
+    assert any(note.startswith(f"{__name__}.Widget is defined by") for note in notes)
+    assert not any(note.startswith("elsewhere.Widget") for note in notes)

@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 import pytest
 
 from xtr_dependency_injection.builder import Origin
-from xtr_dependency_injection.builder.container_builder import ContainerBuilder, kind_of
+from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.service_configurator import (
     BuildState,
     Prepend,
@@ -46,12 +46,6 @@ def _ignore_reader(_obj: object) -> tuple[object, ...]:
 
 def _ignore_callback(_obj: object, _meta: object, _services: ServiceConfigurator) -> None:
     pass
-
-
-def test_kind_of_judges_the_provider() -> None:
-    assert kind_of(Mailer) == "class"
-    assert kind_of(mailer) == "factory"
-    assert kind_of(Mailer()) == "instance"
 
 
 def _builder() -> tuple[BuildState, ContainerBuilder]:
@@ -188,11 +182,8 @@ def test_prepend_extension_config_to_an_unknown_type_is_recorded_and_refused_at_
 
 def test_get_parameter_reads_kernel_parameters() -> None:
     state = BuildState(env="dev", debug=False, bundles=("kernel",), configs={})
-    state.parameters.append(
-        (
-            Origin("kernel", "kernel"),
-            {"kernel": {"name": "shop", "environment": "dev"}},
-        )
+    state.add_parameters(
+        Origin("kernel", "kernel"), {"kernel": {"name": "shop", "environment": "dev"}}
     )
     state.phase = "build"
     builder = ContainerBuilder(state, Origin("kernel", "kernel"))

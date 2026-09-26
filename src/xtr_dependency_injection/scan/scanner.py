@@ -45,7 +45,7 @@ _QUEUES: Final[tuple[tuple[str, str, Callable[[object], object]], ...]] = (
     ("@on_shutdown", "on_shutdown", on_shutdown_of),
     ("@as_decorator", "decorators", decorator_of),
 )
-_EARLY_ONLY: Final = frozenset({"@configure", "@parameters"})
+_EARLY_ONLY: Final = frozenset({"@configure", "@parameters", "@compiler_pass"})
 
 
 @dataclass(slots=True)
@@ -55,7 +55,7 @@ class ScanResult:
     Attributes:
         configure: ``@configure`` providers.
         parameters: ``@parameters`` providers.
-        compiler_passes: ``@compiler_pass`` functions.
+        compiler_passes: ``@compiler_pass`` classes.
         on_boot: ``@on_boot`` hooks.
         on_shutdown: ``@on_shutdown`` hooks.
         decorators: ``@as_decorator`` classes and factories.
@@ -110,7 +110,8 @@ class Scanner:
         Raises:
             ResourceImportError: If a module fails to import.
             ConfigProviderError: If an object carries two queue markers, or a
-                late scan finds a ``@configure`` or ``@parameters``.
+                late scan finds a ``@configure``, ``@parameters`` or
+                ``@compiler_pass`` — each is needed before bundles load.
         """
         result = ScanResult()
         for module in self._modules(resources):

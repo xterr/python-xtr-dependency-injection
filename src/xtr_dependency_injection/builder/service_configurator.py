@@ -13,52 +13,35 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Literal
 
 from xtr_dependency_injection.compiler._wireup_bridge import key_type
+from xtr_dependency_injection.compiler.compiler import Compiler
 from xtr_dependency_injection.exception import BuilderFrozenError, BuilderPhaseError
+from xtr_dependency_injection.parameter_bag.env_placeholder_parameter_bag import (
+    EnvPlaceholderParameterBag,
+)
 
 from .autoconfigurator import Autoconfigurator
 from .autoconfigure_rule import AutoconfigureRule
 from .conflict_policy import DefinitionStore, record_alias
 from .definition import Definition, Lifetime, Origin, ServiceKey
-from .pass_stage import PassStage
 
 if TYPE_CHECKING:
+    # String annotations kept by `from __future__ import annotations`; read only
+    # by type checkers on the dataclass fields below.
     from xtr_dependency_injection.compiler.wireup_compiler import (
-        Decoration,  # noqa: TC004 — string annotation kept by `from __future__ import annotations`; used only by type checkers on the `decorations` field.
+        Decoration,  # noqa: TC004 — see above.
+    )
+    from xtr_dependency_injection.scan.scanned_object import (
+        ScannedObject,  # noqa: TC004 — see above.
     )
 
 __all__ = [
     "BuildState",
-    "CompilerPassRequest",
     "Prepend",
     "ServiceConfigurator",
 ]
 
 
-@dataclass(frozen=True, slots=True)
-class CompilerPassRequest:
-    """One compiler pass to run, with the metadata the kernel needs to sort it.
-
-    Attributes:
-        fn: The callable — ``def (builder: ContainerBuilder) -> object``.
-        stage: The :class:`~xtr_dependency_injection.builder.pass_stage.PassStage`
-            it belongs to.
-        priority: Priority within the stage — highest first.
-        order: The position at which this request was collected; used as
-            the tie-breaker within a stage.
-        origin: Who contributed it — a kernel/bundle/app :class:`Origin`.
-        description: A short human-readable identifier (``module:qualname``
-            of the callable).
-    """
-
-    fn: Callable[[object], object]
-    stage: PassStage
-    priority: int
-    order: int
-    origin: Origin
-    description: str
-
-
-Phase = Literal["build", "prepend", "load", "autoconfigure", "process", "frozen"]
+Phase = Literal["build", "prepend", "load", "process", "frozen"]
 Kind = Literal["class", "factory", "instance"]
 
 
@@ -94,15 +77,26 @@ class BuildState:
         autoconfigurators: What ``builder.register_attribute_for_autoconfiguration``
             registered.
         autoconfigure_rules: What ``builder.register_for_autoconfiguration``
-            registered — nominal subclass rules, applied in the
-            autoconfigure step to every non-kernel definition whose built
-            type has the rule's type in its ``__mro__``.
-        parameters: Parameters bundles contributed, with their origin.
+            registered — nominal subclass rules — then the rules
+            ``RegisterAutoconfigureAttributesPass`` reads off scanned
+            classes; applied by ``ResolveInstanceofConditionalsPass`` to
+            every non-kernel definition whose built type has the rule's type
+            in its ``__mro__``.
+        parameters: Every parameter source — the kernel's, each bundle's, each
+            ``@parameters`` function's — with its origin, merged at compile
+            time with conflicts refused.
+        parameter_bag: The same parameters, merged, for reading and
+            resolving ``%name%`` references while the kernel builds.
         prepends: Config prepends bundles recorded, in call order.
         aliases: The alias table ``alias_key -> target_key``.
         alias_origins: Who contributed each alias, for the conflict policy.
-        compiler_passes: Passes ``builder.add_compiler_pass`` recorded in
-            phase ``build``, in call order.
+        compiler: The compiler: its pass config holds every pass to run,
+            and its log what the passes reported.
+        candidates: Every service candidate the scans found, which the
+            autoconfiguration passes look at.
+        scanned_decorators: Every scanned ``@as_decorator`` class or factory.
+        environ: Where the environment variable processors read variables;
+            ``None`` reads the live process environment.
         decorations: Per key, the decorations to apply — populated by the
             built-in ``OPTIMIZE`` pass and read by the wireup emitter.
     """
@@ -117,10 +111,20 @@ class BuildState:
     autoconfigurators: list[Autoconfigurator] = field(default_factory=list)
     autoconfigure_rules: list[AutoconfigureRule] = field(default_factory=list)
     parameters: list[tuple[Origin, Mapping[str, object]]] = field(default_factory=list)
+    parameter_bag: EnvPlaceholderParameterBag = field(default_factory=EnvPlaceholderParameterBag)
     prepends: list[Prepend] = field(default_factory=list)
     aliases: dict[ServiceKey, ServiceKey] = field(default_factory=dict)
     alias_origins: dict[ServiceKey, Origin] = field(default_factory=dict)
-    compiler_passes: list[CompilerPassRequest] = field(default_factory=list)
+    compiler: Compiler = field(default_factory=Compiler)
+    candidates: list[ScannedObject] = field(default_factory=list)
+    scanned_decorators: list[ScannedObject] = field(default_factory=list)
+    environ: Mapping[str, str] | None = None
+
+    def add_parameters(self, origin: Origin, values: Mapping[str, object]) -> None:
+        """Record ``values`` as a parameter source of ``origin``, and merge them into the bag."""
+        self.parameters.append((origin, values))
+        self.parameter_bag.add(values)
+
     decorations: dict[ServiceKey, list[Decoration]] = field(default_factory=dict)
 
 
@@ -153,7 +157,7 @@ class ServiceConfigurator:
         The key is always ``(type(obj), qualifier)``. Register an alias to
         expose it under an interface (:meth:`alias`).
         """
-        self._allow("instance", "load", "autoconfigure", "process")
+        self._allow("instance", "load", "process")
         key: ServiceKey = (type(obj), qualifier)
         definition = Definition(key, obj, "instance", "singleton", self._origin)
         self._state.store.add(definition)
@@ -175,12 +179,12 @@ class ServiceConfigurator:
         Raises:
             TypeError: If ``target`` is not a class or a plain function.
         """
-        self._allow("set", "load", "autoconfigure", "process")
+        self._allow("set", "load", "process")
         if isinstance(target, type):
             key: ServiceKey = (target, qualifier)
             kind: Kind = "class"
         elif inspect.isfunction(target):
-            key = (key_type(target, None), qualifier)
+            key = (key_type(target), qualifier)
             kind = "factory"
         else:
             msg = f"set() takes a class or a function, not {target!r}"
@@ -206,7 +210,7 @@ class ServiceConfigurator:
         The alias target is validated at compile time (missing →
         ``UnknownServiceError``).
         """
-        self._allow("alias", "load", "autoconfigure", "process")
+        self._allow("alias", "load", "process")
         record_alias(
             self._state.aliases,
             self._state.alias_origins,

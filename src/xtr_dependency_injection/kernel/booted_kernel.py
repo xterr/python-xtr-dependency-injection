@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING, cast, final
 
 import wireup
 
-from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
+from xtr_dependency_injection.compiler._wireup_bridge import (
+    parameter_injections,
+    to_engine_signature,
+)
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 if TYPE_CHECKING:
@@ -101,26 +104,34 @@ async def call_injected(container: AsyncContainer, fn: Callable[..., object]) ->
 
     Sync or async; an awaitable result is awaited.
     """
-    prepared = _prepare_for_engine(fn)
+    prepared = _prepare_for_engine(fn, WireupContainer(container))
     result: object = wireup.inject_from_container(container)(prepared)()
     if inspect.isawaitable(result):
         return cast("object", await result)
     return result
 
 
-def _prepare_for_engine(fn: Callable[..., object]) -> Callable[..., object]:
+def _prepare_for_engine(
+    fn: Callable[..., object], resolver: WireupContainer
+) -> Callable[..., object]:
     """Return ``fn`` — or a wrapper — with our markers rewritten to wireup's.
 
     The wrapper is only created when ``fn``'s signature carries our markers;
     unchanged signatures pass through untouched so wireup keeps seeing the
-    original callable and its introspection stays honest.
+    original callable and its introspection stays honest. A parameter
+    injected from a parameter or the environment has its placeholders
+    resolved by ``resolver`` first, so the wrapper is then async.
     """
     original = inspect.signature(fn, eval_str=True)
     rewritten = to_engine_signature(original)
     if rewritten is original:
         return fn
+    resolved_names = parameter_injections(original)
 
     async def acall(**kwargs: object) -> object:
+        for name in resolved_names:
+            if name in kwargs:
+                kwargs[name] = await resolver.resolve_env_placeholders(kwargs[name])
         result: object = fn(**kwargs)
         if inspect.isawaitable(result):
             return cast("object", await result)
@@ -129,7 +140,8 @@ def _prepare_for_engine(fn: Callable[..., object]) -> Callable[..., object]:
     def scall(**kwargs: object) -> object:
         return fn(**kwargs)
 
-    wrapper: Callable[..., object] = acall if inspect.iscoroutinefunction(fn) else scall
+    asynchronous = inspect.iscoroutinefunction(fn) or bool(resolved_names)
+    wrapper: Callable[..., object] = acall if asynchronous else scall
     setattr(wrapper, "__signature__", rewritten)  # noqa: B010 — wireup reads inspect.signature.
     for attribute in ("__name__", "__qualname__", "__module__"):
         if hasattr(fn, attribute):

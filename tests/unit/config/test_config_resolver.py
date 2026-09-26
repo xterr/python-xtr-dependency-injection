@@ -66,7 +66,6 @@ def _scanned(*functions: Callable[..., object]) -> list[ScannedObject]:
 def _resolve(
     *functions: Callable[..., object],
     bundles: tuple[AnyBundle, ...] | None = None,
-    env: str = "prod",
     given: tuple[object, ...] = (),
     prepends: Sequence[Prepend] = (),
 ) -> tuple[object, tuple[str, ...]]:
@@ -75,7 +74,6 @@ def _resolve(
         bundles=bundles,
         providers=_scanned(*functions),
         inactive={},
-        env=env,
         given=given,
         prepends=prepends,
     )
@@ -206,7 +204,6 @@ def test_a_prepend_to_an_inactive_bundle_is_reported_as_skipped() -> None:
         bundles=(CoreBundle(), BusBundle()),
         providers=[],
         inactive={},
-        env="prod",
         prepends=(_prepend("bus", "log", _add_channel("bus")),),
     )
 
@@ -244,7 +241,6 @@ def test_a_provider_for_an_inactive_bundle_names_it() -> None:
             bundles=(CoreBundle(),),
             providers=_scanned(orphan),
             inactive={OrphanConfig: "orphans"},
-            env="prod",
         )
 
     assert caught.value.inactive_bundle == "orphans"
@@ -268,7 +264,7 @@ def test_a_given_config_of_an_unowned_type_is_refused() -> None:
 
 
 def test_a_bundle_without_config_resolves_to_no_config() -> None:
-    resolved = resolve_configs(bundles=(CoreBundle(),), providers=[], inactive={}, env="prod")
+    resolved = resolve_configs(bundles=(CoreBundle(),), providers=[], inactive={})
 
     assert resolved.values == {"kernel": NoConfig()}
     assert resolved.reports[0].steps == ("default",)

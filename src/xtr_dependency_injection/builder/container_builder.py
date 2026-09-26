@@ -9,14 +9,12 @@ narrower operations.
 
 from __future__ import annotations
 
-import inspect
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final, TypeVar, cast, final, overload
+from typing import TYPE_CHECKING, TypeVar, cast, final, overload
 
+from xtr_dependency_injection.compiler.pass_stage import PassStage
 from xtr_dependency_injection.exception import (
     ConfigProviderError,
     MissingBundleError,
-    ParameterNotFoundError,
     UnknownConfigTypeError,
     UnknownServiceError,
 )
@@ -26,24 +24,20 @@ from .autoconfigurator import Apply, Autoconfigurator, Reader
 from .autoconfigure_rule import AutoconfigureRule
 from .conflict_policy import record_alias
 from .definition import Definition, Lifetime, Origin, ServiceKey
-from .pass_stage import PassStage
-from .service_configurator import BuildState, CompilerPassRequest, Kind, Phase, Prepend
+from .service_configurator import BuildState, Phase, Prepend
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Hashable, Sequence
+    from collections.abc import Callable, Hashable
 
-__all__ = ["ContainerBuilder", "kind_of"]
+    from xtr_dependency_injection.compiler.compiler import Compiler
+    from xtr_dependency_injection.compiler.compiler_pass_interface import CompilerPassInterface
+    from xtr_dependency_injection.parameter_bag.env_placeholder_parameter_bag import (
+        EnvPlaceholderParameterBag,
+    )
+
+__all__ = ["ContainerBuilder"]
 
 C = TypeVar("C")
-
-
-def kind_of(provider: object) -> Kind:
-    """Return how ``provider`` is registered, judged from what it is."""
-    if isinstance(provider, type):
-        return "class"
-    if inspect.isfunction(provider):
-        return "factory"
-    return "instance"
 
 
 @final
@@ -85,7 +79,7 @@ class ContainerBuilder:
 
         Allowed in phases ``load`` and ``process``.
         """
-        self._allow("register", "load", "autoconfigure", "process")
+        self._allow("register", "load", "process")
         key: ServiceKey = (service, qualifier)
         definition = Definition(key, service, "class", lifetime, self._origin)
         self._state.store.add(definition)
@@ -97,7 +91,7 @@ class ContainerBuilder:
         Allowed in phases ``load`` and ``process``. Records the previous
         origin as an override.
         """
-        self._allow("set_definition", "load", "autoconfigure", "process")
+        self._allow("set_definition", "load", "process")
         existing = self._state.store.get(definition.key)
         if existing is None:
             self._state.store.add(definition)
@@ -140,7 +134,7 @@ class ContainerBuilder:
         Raises:
             UnknownServiceError: If no such definition exists.
         """
-        self._allow("remove_definition", "load", "autoconfigure", "process")
+        self._allow("remove_definition", "load", "process")
         definition = self._require((service, qualifier), "remove_definition")
         self._state.store.remove(definition.key)
 
@@ -161,7 +155,7 @@ class ContainerBuilder:
 
         Allowed in phases ``load`` and ``process``.
         """
-        self._allow("set_alias", "load", "autoconfigure", "process")
+        self._allow("set_alias", "load", "process")
         record_alias(
             self._state.aliases,
             self._state.alias_origins,
@@ -169,6 +163,10 @@ class ContainerBuilder:
             (target, target_qualifier),
             self._origin,
         )
+
+    def get_aliases(self) -> dict[ServiceKey, ServiceKey]:
+        """Return every alias, ``alias_key -> target_key``, in declaration order."""
+        return dict(self._state.aliases)
 
     def get_alias(self, alias: type, /, qualifier: Hashable | None = None) -> ServiceKey:
         """Return the target key for ``(alias, qualifier)``.
@@ -192,7 +190,7 @@ class ContainerBuilder:
         Raises:
             UnknownServiceError: If no such alias exists.
         """
-        self._allow("remove_alias", "load", "autoconfigure", "process")
+        self._allow("remove_alias", "load", "process")
         key: ServiceKey = (alias, qualifier)
         if key not in self._state.aliases:
             raise UnknownServiceError(key, "remove_alias")
@@ -212,36 +210,38 @@ class ContainerBuilder:
 
     def add_compiler_pass(
         self,
-        fn: Callable[[ContainerBuilder], object],
+        compiler_pass: CompilerPassInterface,
         /,
         *,
         stage: PassStage = PassStage.BEFORE_OPTIMIZATION,
         priority: int = 0,
     ) -> None:
-        """Register a compiler pass to run in ``stage`` at ``priority``.
+        """Register ``compiler_pass`` to run in ``stage`` at ``priority``.
 
-        Only allowed in phase ``build`` (from :meth:`Bundle.build`). Passes
-        registered here run after the bundle's own ``process`` (bundle-as-
-        compiler-pass) and before the application's scanned
-        ``@compiler_pass`` functions.
+        Only allowed in phase ``build`` (from :meth:`Bundle.build`). The pass
+        runs with a builder bound to this builder's origin.
+
+        Raises:
+            TypeError: If ``compiler_pass`` does not implement
+                :class:`CompilerPassInterface`.
         """
         self._allow("add_compiler_pass", "build")
-        self._state.compiler_passes.append(
-            CompilerPassRequest(
-                fn=cast("Callable[[object], object]", fn),
-                stage=stage,
-                priority=priority,
-                order=len(self._state.compiler_passes),
-                origin=self._origin,
-                description=qualified_name(fn),
-            )
-        )
+        self._state.compiler.add_pass(compiler_pass, stage, priority, origin=self._origin)
+
+    def get_compiler(self) -> Compiler:
+        """Return the compiler: its pass config and its log."""
+        return self._state.compiler
+
+    def log(self, compiler_pass: CompilerPassInterface, message: str, /) -> None:
+        """Record ``message`` in the compiler log, under ``compiler_pass``."""
+        self._state.compiler.log(compiler_pass, message)
 
     def register_for_autoconfiguration(self, type_: type, /) -> AutoconfigureRule:
         """Return an :class:`AutoconfigureRule` for every subclass of ``type_``.
 
-        Allowed in phases ``build`` and ``load``. The kernel's autoconfigure
-        step applies each rule to every non-kernel definition whose built
+        Allowed in phases ``build`` and ``load``.
+        ``ResolveInstanceofConditionalsPass`` applies each rule to every
+        non-kernel definition whose built
         type has ``type_`` in its ``__mro__`` (a nominal subclass check). A
         tag already carried on a definition wins over the rule's — explicit
         stays.
@@ -252,18 +252,13 @@ class ContainerBuilder:
         return rule
 
     def register_attribute_for_autoconfiguration(self, reader: Reader, callback: Apply, /) -> None:
-        """Register a callback the kernel calls for every metadata item ``reader`` finds.
+        """Register a callback called for every metadata item ``reader`` finds on a candidate.
 
-        The callback runs in the autoconfigure step with the registering
-        bundle's :class:`ServiceConfigurator`.
+        ``AttributeAutoconfigurationPass`` runs the callback with the
+        registering bundle's :class:`ServiceConfigurator`.
         """
         self._allow(
-            "register_attribute_for_autoconfiguration",
-            "build",
-            "prepend",
-            "load",
-            "autoconfigure",
-            "process",
+            "register_attribute_for_autoconfiguration", "build", "prepend", "load", "process"
         )
         self._state.autoconfigurators.append(Autoconfigurator(self._origin.name, reader, callback))
 
@@ -274,12 +269,12 @@ class ContainerBuilder:
         leaf set twice by non-``app`` sources with a different value raises
         :class:`ParameterConflictError` at parameter-merge time.
         """
-        self._allow("set_parameter", "build", "prepend", "load", "autoconfigure", "process")
+        self._allow("set_parameter", "build", "prepend", "load", "process")
         parts = name.split(".")
         nested: dict[str, object] = {parts[-1]: value}
         for part in reversed(parts[:-1]):
             nested = {part: nested}
-        self._state.parameters.append((self._origin, nested))
+        self._state.add_parameters(self._origin, nested)
 
     @overload
     def get_extension_config(self, bundle: str, /) -> object: ...
@@ -343,20 +338,23 @@ class ContainerBuilder:
         Raises:
             ParameterNotFoundError: If the parameter is not set.
         """
-        self._allow("get_parameter", "build", "prepend", "load", "autoconfigure", "process")
-        found, value = _lookup_parameter(self._state.parameters, name)
-        if not found:
-            raise ParameterNotFoundError(name)
-        return value
+        self._allow("get_parameter", "build", "prepend", "load", "process")
+        return self._state.parameter_bag.get(name)
 
     def has_parameter(self, name: str, /) -> bool:
         """Return whether the parameter ``name`` is defined.
 
         Allowed from phase ``build`` onward.
         """
-        self._allow("has_parameter", "build", "prepend", "load", "autoconfigure", "process")
-        found, _ = _lookup_parameter(self._state.parameters, name)
-        return found
+        self._allow("has_parameter", "build", "prepend", "load", "process")
+        return self._state.parameter_bag.has(name)
+
+    def get_parameter_bag(self) -> EnvPlaceholderParameterBag:
+        """Return the parameters of the build, merged, as stored.
+
+        ``%name%`` references are resolved by ``ResolveParameterPlaceHoldersPass``.
+        """
+        return self._state.parameter_bag
 
     def remove(self, service: type, /, *, qualifier: Hashable | None = None) -> None:
         """Remove the service ``(service, qualifier)``.
@@ -387,38 +385,3 @@ class ContainerBuilder:
             raise BuilderFrozenError(operation)
         if phase not in phases:
             raise BuilderPhaseError(operation, phase)
-
-
-def _lookup_parameter(
-    sources: Sequence[tuple[Origin, Mapping[str, object]]], name: str
-) -> tuple[bool, object]:
-    """Read a dotted-name parameter from ``(origin, mapping)`` sources, last-write wins."""
-    parts = name.split(".")
-    found = False
-    value: object = None
-    for _origin, values in sources:
-        current: object = values
-        matched = True
-        for part in parts:
-            step = _step_into(current, part)
-            if step is _MISSING:
-                matched = False
-                break
-            current = step
-        if matched:
-            found = True
-            value = current
-    return found, value
-
-
-_MISSING: Final = object()
-
-
-def _step_into(current: object, key: str) -> object:
-    """Return ``current[key]`` when ``current`` is a mapping with ``key``, else ``_MISSING``."""
-    if not isinstance(current, Mapping):
-        return _MISSING
-    mapping = cast("Mapping[str, object]", current)
-    if key not in mapping:
-        return _MISSING
-    return mapping[key]

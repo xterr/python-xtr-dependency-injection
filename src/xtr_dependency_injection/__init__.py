@@ -13,9 +13,10 @@ from importlib.metadata import version
 from .builder import Decorates, Definition, Origin, ServiceKey
 from .builder.bundle_active import bundle_active
 from .builder.container_builder import ContainerBuilder
-from .builder.pass_stage import PassStage
 from .builder.service_configurator import ServiceConfigurator
 from .bundle import Bundle, BundleMetadata, NoConfig, RequiredBundle, as_bundle, required_bundle
+from .compiler.compiler_pass_interface import CompilerPassInterface
+from .compiler.pass_stage import PassStage
 from .config import AliasOf, configure, env, parameters
 from .decorator import (
     Autowire,
@@ -40,7 +41,15 @@ from .decorator import (
 from .diagnostics import KernelReport
 from .exception._naming import qualified_name
 from .kernel import BootedKernel, CompiledKernel, Kernel, KernelInterface
-from .runtime import ServiceLocator, ServicesResetter, bind_callable
+from .parameter_bag import ContainerBagInterface, ParameterBagInterface
+from .runtime import (
+    EnvVarLoaderInterface,
+    EnvVarProcessor,
+    EnvVarProcessorInterface,
+    ServiceLocator,
+    ServicesResetter,
+    bind_callable,
+)
 from .scan import DEFAULT_EXCLUDES
 
 __all__ = [
@@ -52,9 +61,14 @@ __all__ = [
     "Bundle",
     "BundleMetadata",
     "CompiledKernel",
+    "CompilerPassInterface",
+    "ContainerBagInterface",
     "ContainerBuilder",
     "Decorates",
     "Definition",
+    "EnvVarLoaderInterface",
+    "EnvVarProcessor",
+    "EnvVarProcessorInterface",
     "Injected",
     "Kernel",
     "KernelInterface",
@@ -62,6 +76,7 @@ __all__ = [
     "NoConfig",
     "OnInvalid",
     "Origin",
+    "ParameterBagInterface",
     "PassStage",
     "RequiredBundle",
     "ServiceConfigurator",

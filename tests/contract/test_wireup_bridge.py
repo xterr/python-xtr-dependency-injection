@@ -51,23 +51,21 @@ class Unmarked:
 
 
 @pytest.mark.parametrize(
-    ("provider", "as_type", "qualifier", "expected"),
+    ("provider", "qualifier", "expected"),
     [
-        (Marked, None, None, Marked),
-        (Implementation, Contract, "q", Contract),
-        (product, None, None, Product),
-        (product_resource, None, None, Product),
+        (Marked, None, Marked),
+        (product, None, Product),
+        (product_resource, None, Product),
     ],
 )
 async def test_the_key_type_is_what_wireup_registers(
     provider: Callable[..., object] | type,
-    as_type: type | None,
     qualifier: str | None,
     expected: type,
 ) -> None:
     container = wireup.create_async_container(injectables=[provider])
 
-    key = key_type(provider, as_type)
+    key = key_type(provider)
 
     assert key is expected
     async with container.enter_scope() as scope:

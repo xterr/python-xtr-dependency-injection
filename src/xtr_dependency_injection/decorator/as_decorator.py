@@ -22,6 +22,7 @@ decorator under the missing target's key with ``None`` for its
 
 from __future__ import annotations
 
+import inspect
 import types
 from collections.abc import Hashable
 from dataclasses import dataclass
@@ -136,7 +137,8 @@ def decorated_parameter_of(decorator: object, target: object) -> DecoratedParame
 
     Raises:
         DecoratorSignatureError: If ``decorator`` has none, several, or one
-            parameter annotated for another type than ``target``.
+            parameter annotated for another type than ``target``, or a
+            positional-only one.
     """
     name = qualified_name(decorator)
     signature = evaluated_signature(
@@ -155,6 +157,12 @@ def decorated_parameter_of(decorator: object, target: object) -> DecoratedParame
         )
         raise DecoratorSignatureError(name, reason)
     parameter_name, inner_type, allows_none = found[0]
+    if signature.parameters[parameter_name].kind is inspect.Parameter.POSITIONAL_ONLY:
+        reason = (
+            f"its Annotated[..., AutowireDecorated()] parameter {parameter_name!r} "
+            "is positional-only; the decorated service is passed by keyword"
+        )
+        raise DecoratorSignatureError(name, reason)
     if inner_type is not target:
         reason = (
             f"its Annotated[..., AutowireDecorated()] parameter {parameter_name!r} "

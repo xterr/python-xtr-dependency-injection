@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
 
-from xtr_dependency_injection.builder.pass_stage import PassStage
+from xtr_dependency_injection.compiler.compiler_pass_interface import CompilerPassInterface
+from xtr_dependency_injection.compiler.pass_stage import PassStage
 
 from ._marker import own_marker, set_marker
 
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 __all__ = ["CompilerPassMarker", "compiler_pass", "compiler_pass_of"]
 
-F = TypeVar("F", bound="Callable[..., object]")
+P = TypeVar("P", bound=type[CompilerPassInterface])
 
 _ATTRIBUTE: Final = "__xtr_compiler_pass__"
 
@@ -28,29 +29,37 @@ class CompilerPassMarker:
 
 
 @overload
-def compiler_pass(fn: F, /) -> F: ...
+def compiler_pass(cls: P, /) -> P: ...
 @overload
 def compiler_pass(
     *, stage: PassStage = PassStage.BEFORE_OPTIMIZATION, priority: int = 0
-) -> Callable[[F], F]: ...
+) -> Callable[[P], P]: ...
 def compiler_pass(
-    fn: F | None = None,
+    cls: P | None = None,
     /,
     *,
     stage: PassStage = PassStage.BEFORE_OPTIMIZATION,
     priority: int = 0,
-) -> F | Callable[[F], F]:
-    """Run the decorated ``def (builder: ContainerBuilder) -> None`` in ``stage``.
+) -> P | Callable[[P], P]:
+    """Run the decorated :class:`CompilerPassInterface` class in ``stage`` at ``priority``.
 
-    Passes run stage by stage in the order declared by (see
-    :class:`~xtr_dependency_injection.builder.pass_stage.PassStage`); within
-    one stage, by ``priority`` descending, ties by scan order.
+    The kernel builds the class with no arguments when it prepares the
+    container, after every bundle's ``build``. Passes run stage by stage (see
+    :class:`PassStage`); within one stage by ``priority`` descending, ties by
+    registration order.
+
+    Raises:
+        TypeError: If the decorated object is not a class implementing
+            :class:`CompilerPassInterface`.
     """
 
-    def record(target: F) -> F:
+    def record(target: P) -> P:
+        if not (isinstance(target, type) and issubclass(target, CompilerPassInterface)):  # pyright: ignore[reportUnnecessaryIsInstance] — callers outside the type checker.
+            msg = f"@compiler_pass needs a class implementing CompilerPassInterface, not {target!r}"  # pyright: ignore[reportUnreachable]
+            raise TypeError(msg)
         return set_marker(target, _ATTRIBUTE, CompilerPassMarker(priority, stage))
 
-    return record(fn) if fn is not None else record
+    return record(cls) if cls is not None else record
 
 
 def compiler_pass_of(obj: object) -> CompilerPassMarker | None:

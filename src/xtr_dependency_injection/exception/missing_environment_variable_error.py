@@ -8,7 +8,7 @@ __all__ = ["MissingEnvironmentVariableError"]
 
 
 class MissingEnvironmentVariableError(DependencyInjectionError):
-    """``env()`` read a variable that is not set and has no default."""
+    """An environment variable a service needs is not set, and has no default."""
 
     name: str
 

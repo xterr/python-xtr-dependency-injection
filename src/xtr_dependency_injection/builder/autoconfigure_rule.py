@@ -1,7 +1,7 @@
 """One ``register_for_autoconfiguration`` rule — a nominal subclass match.
 
-The kernel's autoconfigure step applies every rule to every definition whose
-built type has the rule's ``type_`` in its ``__mro__`` (a nominal subclass
+``ResolveInstanceofConditionalsPass`` applies every rule to every definition
+whose built type has the rule's ``type_`` in its ``__mro__`` (a nominal subclass
 check, not a structural check). Kernel-origin definitions are never
 autoconfigured. A tag name already present on a definition wins over the
 rule's — explicit stays.
@@ -9,6 +9,7 @@ rule's — explicit stays.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .definition import Lifetime
@@ -29,11 +30,14 @@ class AutoconfigureRule:
             definitions. A ``callable`` in an attribute value is invoked with
             the concrete built class and must return the attribute mapping.
         lifetime: If not ``None``, the lifetime to give a matched definition.
+        factory: If not ``None``, the factory a matched class definition is
+            built by instead — ``@autoconfigure(factory=...)``.
     """
 
     type_: type
     tags: dict[str, list[dict[str, object]]] = field(default_factory=dict)
     lifetime: Lifetime | None = None
+    factory: Callable[..., object] | None = None
 
     def add_tag(self, name: str, /, **attributes: object) -> AutoconfigureRule:
         """Add tag ``name`` with ``attributes``.

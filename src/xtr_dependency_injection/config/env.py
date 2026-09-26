@@ -1,49 +1,41 @@
-"""Reading an environment variable while the kernel builds: ``env()``.
+"""Standing for an environment variable in a config or parameter: ``env()``.
 
-Config functions run during ``build()``, so ``env()`` reads the environment
-of the process building the container.
+``env()`` returns a placeholder; the variable is read when a service needing
+it is built, by the container's environment variable processors (see
+:mod:`~xtr_dependency_injection.config.env_placeholder`). Two spellings, one
+mechanism:
 
-``env`` is overloaded so the return type follows ``cast`` and ``default``:
-``env("PORT", int)`` is ``int``, ``env("PORT", int, default=None)`` is
-``int | None``, and ``env("HOST")`` is ``str``.
+- ``env("PORT", int)`` — typed: the cast becomes the processor prefix it
+  stands for (``int``, ``float``, ``bool``, ``str``, or an ``Enum`` class),
+  and any other callable is applied to the processed value.
+- ``env("json:file:SECRETS")`` — a processor chain, read right to left:
+  ``file`` reads the file ``SECRETS`` names, ``json`` decodes it.
 
-``bool`` is the one ``cast`` that is not applied as ``bool(value)``. That would
-be truthy for every non-empty string — ``bool("false")`` is ``True`` — which is
-never what an environment flag means. So ``bool`` is special-cased: the value is
-read as ``1/true/yes/on`` for true and ``0/false/no/off`` or empty for false,
-case-insensitively, and anything else raises ``InvalidEnvironmentVariableError``.
+``env`` is overloaded so the declared type follows ``cast`` and ``default``:
+``env("PORT", int)`` is an ``int``, ``env("PORT", int, default=None)`` is
+``int | None``, ``env("HOST")`` is a ``str``. ``default`` is returned when
+the variable is not set, and is also the value a numeric placeholder carries
+while the kernel builds, so validation sees a plausible number.
 """
 
 from __future__ import annotations
 
-import os
 from enum import Enum
-from typing import TYPE_CHECKING, Final, TypeVar, overload
+from typing import TYPE_CHECKING, TypeVar, overload
 
-from xtr_dependency_injection.exception import (
-    InvalidEnvironmentVariableError,
-    MissingEnvironmentVariableError,
-)
+from .env_placeholder import MISSING, Missing, placeholder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from typing_extensions import TypeIs
 
 __all__ = ["MISSING", "Missing", "env"]
 
 T = TypeVar("T")
 D = TypeVar("D")
 
-_TRUE: Final = frozenset({"1", "true", "yes", "on"})
-_FALSE: Final = frozenset({"0", "false", "no", "off", ""})
-
-
-class Missing(Enum):
-    """The type of :data:`MISSING`: no default was given."""
-
-    MISSING = "MISSING"
-
-
-MISSING: Final = Missing.MISSING
+_PREFIX_OF: dict[object, str] = {str: "string", int: "int", float: "float", bool: "bool"}
 
 
 @overload
@@ -56,39 +48,28 @@ def env(name: str, cast: Callable[[str], T], /) -> T: ...
 def env(name: str, cast: Callable[[str], T], /, *, default: D) -> T | D: ...
 def env(
     name: str,
-    cast: Callable[[str], object] = str,
+    converter: Callable[[str], object] | None = None,
     /,
     *,
     default: object = MISSING,
 ) -> object:
-    """Return the environment variable ``name``, converted by ``cast``.
+    """Return a placeholder for the environment variable ``name``, read when it is needed.
 
-    ``bool`` reads ``1/true/yes/on`` as true and ``0/false/no/off`` or an
-    empty value as false, in any case — ``bool("false")`` would be true. A
-    default is returned as given, not converted.
-
-    Raises:
-        MissingEnvironmentVariableError: If the variable is not set and no
-            default was given.
-        InvalidEnvironmentVariableError: If ``cast`` refuses the value.
+    ``name`` may carry processor prefixes (``"json:file:SECRETS"``). A
+    ``cast`` of ``int``, ``float``, ``bool``, ``str`` or an ``Enum`` class
+    adds the matching prefix; any other callable is applied to the value the
+    processors produce.
     """
-    value = os.environ.get(name)
-    if value is None:
-        if default is MISSING:
-            raise MissingEnvironmentVariableError(name)
-        return default
-    if cast is bool:
-        return _boolean(name, value)
-    try:
-        return cast(value)
-    except (TypeError, ValueError) as error:
-        raise InvalidEnvironmentVariableError(name, cast, value) from error
+    if converter is None:
+        return placeholder(name, default=default)
+    prefix = _PREFIX_OF.get(converter)
+    if prefix is None and _is_enum(converter):
+        prefix = f"enum:{converter.__module__}.{converter.__qualname__}"
+    if prefix is not None:
+        expression = name if prefix == "string" else f"{prefix}:{name}"
+        return placeholder(expression, default=default)
+    return placeholder(name, converter, default)
 
 
-def _boolean(name: str, value: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in _TRUE:
-        return True
-    if normalized in _FALSE:
-        return False
-    raise InvalidEnvironmentVariableError(name, bool, value)
+def _is_enum(converter: object) -> TypeIs[type[Enum]]:
+    return isinstance(converter, type) and issubclass(converter, Enum)

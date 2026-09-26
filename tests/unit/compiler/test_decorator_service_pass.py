@@ -1,5 +1,3 @@
-"""Todo 18: ``@as_decorator`` / ``set_decorated_service`` with ``OnInvalid`` + lifetime."""
-
 from __future__ import annotations
 
 from typing import Annotated
@@ -12,13 +10,14 @@ from xtr_dependency_injection.builder.service_configurator import (
     BuildState,
     ServiceConfigurator,
 )
-from xtr_dependency_injection.compiler.decorator_service_pass import resolve_decorations_pass
+from xtr_dependency_injection.compiler.decorator_service_pass import DecoratorServicePass
 from xtr_dependency_injection.decorator.as_decorator import (
     AutowireDecorated,
     OnInvalid,
 )
 from xtr_dependency_injection.exception import (
     DecoratorSignatureError,
+    InvalidDefinitionError,
     UnknownServiceError,
 )
 
@@ -38,7 +37,9 @@ class StrictBus:
 
 
 def _state() -> BuildState:
-    return BuildState(env="dev", debug=False, bundles=("kernel",), configs={})
+    state = BuildState(env="dev", debug=False, bundles=("kernel",), configs={})
+    state.phase = "process"
+    return state
 
 
 def _builder(state: BuildState) -> ContainerBuilder:
@@ -54,7 +55,7 @@ def test_missing_target_with_exception_raises() -> None:
     )
 
     with pytest.raises(UnknownServiceError, match="cannot decorate"):
-        resolve_decorations_pass(_builder(state), [])
+        DecoratorServicePass().process(_builder(state))
 
 
 def test_missing_target_with_ignore_drops_the_decorator() -> None:
@@ -65,7 +66,7 @@ def test_missing_target_with_ignore_drops_the_decorator() -> None:
         .set_decorated_service(Bus, on_invalid=OnInvalid.IGNORE)
     )
 
-    resolve_decorations_pass(_builder(state), [])
+    DecoratorServicePass().process(_builder(state))
 
     assert state.store.get((StrictBus, None)) is None
     assert state.store.get((Bus, None)) is None
@@ -80,7 +81,7 @@ def test_missing_target_with_null_registers_decorator_under_target_key() -> None
         .set_decorated_service(Bus, on_invalid=OnInvalid.NULL)
     )
 
-    resolve_decorations_pass(_builder(state), [])
+    DecoratorServicePass().process(_builder(state))
 
     assert state.store.get((NullableBus, None)) is None
     fallback = state.store.get((Bus, None))
@@ -98,7 +99,7 @@ def test_missing_target_with_null_requires_none_in_annotation() -> None:
     )
 
     with pytest.raises(DecoratorSignatureError, match="allow None"):
-        resolve_decorations_pass(_builder(state), [])
+        DecoratorServicePass().process(_builder(state))
 
 
 def test_decorator_inherits_targets_lifetime_and_leaves_only_under_target_key() -> None:
@@ -110,7 +111,7 @@ def test_decorator_inherits_targets_lifetime_and_leaves_only_under_target_key() 
         .set_decorated_service(Bus)
     )
 
-    resolve_decorations_pass(_builder(state), [])
+    DecoratorServicePass().process(_builder(state))
 
     assert state.store.get((StrictBus, None)) is None
     (decoration,) = state.decorations[(Bus, None)]
@@ -140,7 +141,61 @@ def test_multiple_decorators_stack_by_priority_descending() -> None:
         .set_decorated_service(Bus, priority=10)
     )
 
-    resolve_decorations_pass(_builder(state), [])
+    DecoratorServicePass().process(_builder(state))
 
     ordered = state.decorations[(Bus, None)]
     assert [d.decorator for d in ordered] == [HighPrio, LowPrio]
+
+
+def test_an_ignored_decorator_is_logged() -> None:
+    state = _state()
+    _ = (
+        ServiceConfigurator(state, Origin("app", "tests:StrictBus"))
+        .set(StrictBus)
+        .set_decorated_service(Bus, on_invalid=OnInvalid.IGNORE)
+    )
+
+    DecoratorServicePass().process(_builder(state))
+
+    (entry,) = state.compiler.get_log()
+    assert "StrictBus" in entry
+    assert entry.endswith("is missing.")
+
+
+class LabelledBus:
+    def __init__(self, inner: Annotated[Bus, AutowireDecorated()], label: str) -> None:
+        self.inner: Bus = inner
+        self.label: str = label
+
+
+def test_a_decorators_arguments_travel_with_its_decoration() -> None:
+    state = _state()
+    _ = ServiceConfigurator(state, Origin("app", "tests:Bus")).set(Bus)
+    _ = (
+        ServiceConfigurator(state, Origin("app", "tests:LabelledBus"))
+        .set(LabelledBus)
+        .set_decorated_service(Bus)
+        .set_argument("label", "outer")
+    )
+
+    DecoratorServicePass().process(_builder(state))
+
+    (decoration,) = state.decorations[Bus, None]
+    assert decoration.arguments == {"label": "outer"}
+
+
+@pytest.mark.parametrize(
+    ("name", "reason"), [("inner", "the decorated service"), ("nope", "names no parameter")]
+)
+def test_a_decorator_argument_that_does_not_fit_is_refused(name: str, reason: str) -> None:
+    state = _state()
+    _ = ServiceConfigurator(state, Origin("app", "tests:Bus")).set(Bus)
+    _ = (
+        ServiceConfigurator(state, Origin("app", "tests:LabelledBus"))
+        .set(LabelledBus)
+        .set_decorated_service(Bus)
+        .set_argument(name, "x")
+    )
+
+    with pytest.raises(InvalidDefinitionError, match=reason):
+        DecoratorServicePass().process(_builder(state))

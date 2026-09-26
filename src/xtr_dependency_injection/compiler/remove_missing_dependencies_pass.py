@@ -1,89 +1,124 @@
-"""The built-in ``BEFORE_REMOVING`` pass: drop definitions whose dependency is missing.
+"""Removing the definitions whose ``container.remove_if_missing`` conditions are not met.
 
-Every ``container.remove_if_missing`` tag is a set of independent conditions
-— ``service``, ``class_``, ``package`` — and a definition survives only
-while every tag on it holds. Removing one definition can invalidate
-another's tag, so the pass sweeps until it settles.
+A tag is a set of independent conditions — ``service`` (with an optional
+``qualifier``), ``class_`` and ``package`` — and a definition survives only
+while every attribute of every tag on it holds. Removing a definition can turn
+another condition false, so the container is swept until it settles.
 """
 
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING, cast
+from importlib.metadata import PackageNotFoundError, distribution
+from typing import TYPE_CHECKING, Final, cast, final
 
 from xtr_dependency_injection.decorator.remove_if_missing import REMOVE_IF_MISSING_TAG
+from xtr_dependency_injection.exception import InvalidDefinitionError, UnknownServiceError
+from xtr_dependency_injection.exception._naming import key_name
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Hashable, Mapping
 
     from xtr_dependency_injection.builder.container_builder import ContainerBuilder
     from xtr_dependency_injection.builder.definition import ServiceKey
-    from xtr_dependency_injection.builder.service_configurator import BuildState
 
-__all__ = ["remove_if_missing_pass"]
+__all__ = ["RemoveMissingDependenciesPass"]
+
+_ATTRIBUTES: Final = frozenset({"service", "qualifier", "class_", "package"})
+_CONDITIONS: Final = ("service", "class_", "package")
 
 
-def remove_if_missing_pass(builder: ContainerBuilder) -> None:
-    """BEFORE_REMOVING built-in: drop every definition whose ``container.remove_if_missing`` fails.
+@final
+class RemoveMissingDependenciesPass:
+    """Drops every definition a ``container.remove_if_missing`` tag no longer allows.
 
-    A tag has ``service=<type>`` (with optional ``qualifier=``),
-    ``class_="module:Class"`` and/or ``package="dist"``; every tag on a
-    definition must hold, and every attribute of a tag must hold. Removing
-    one definition can invalidate another's tag, so the pass sweeps until
-    it settles. When a definition is dropped, any alias pointing at it is
-    dropped too.
-
-    ``service``, ``class_`` and ``package`` are each their own condition,
-    checked independently — any non-empty combination may appear in one
-    tag. ``class_`` carries a trailing underscore because ``class`` is a
-    reserved word. ``parent_packages`` is not supported.
+    ``class_`` carries a trailing underscore because ``class`` is a reserved
+    word. When a definition is dropped, every alias pointing at it is dropped
+    too, so nothing is left dangling.
     """
-    state = builder._state  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] — the built-in pass reads state directly.
-    tagged: dict[ServiceKey, list[dict[str, object]]] = {
-        definition.key: definition.get_tag(REMOVE_IF_MISSING_TAG)
-        for definition in state.store.entries()
-        if definition.has_tag(REMOVE_IF_MISSING_TAG)
-    }
-    if not tagged:
-        return
-    while True:
-        removed = False
-        for key in list(tagged):
-            if state.store.get(key) is None:
-                del tagged[key]
-                continue
-            for tag in tagged[key]:
-                if _remove_if_missing_holds(state, tag):
+
+    __slots__ = ()
+
+    def process(self, builder: ContainerBuilder) -> None:
+        """Sweep the tagged definitions until no further one is removed.
+
+        Raises:
+            InvalidDefinitionError: If a tag has an unknown attribute, or none
+                of ``service``, ``class_`` and ``package``.
+        """
+        tagged = builder.find_tagged_service_ids(REMOVE_IF_MISSING_TAG)
+        if not tagged:
+            return
+        for key, tags in tagged.items():
+            for tag in tags:
+                _validate(key, tag)
+        removed = True
+        while removed:
+            removed = False
+            for key, tags in tagged.items():
+                if not builder.has_definition(*key):
                     continue
-                _remove_with_aliases(state, key)
-                del tagged[key]
-                removed = True
-                break
-        if not removed:
-            break
+                for tag in tags:
+                    reason = _unmet(builder, tag)
+                    if reason is None:
+                        continue
+                    self._remove(builder, key, reason)
+                    removed = True
+                    break
+
+    def _remove(self, builder: ContainerBuilder, key: ServiceKey, reason: str) -> None:
+        """Drop ``key`` — a definition or an alias — and every alias pointing at it."""
+        if builder.has_definition(*key):
+            builder.remove_definition(*key)
+        else:
+            builder.remove_alias(*key)
+        builder.log(self, f"Removed service {key_name(key)}; reason: {reason}.")
+        for alias, target in builder.get_aliases().items():
+            if target == key:
+                self._remove(builder, alias, f"it aliases {key_name(key)}")
 
 
-def _remove_if_missing_holds(state: BuildState, tag: Mapping[str, object]) -> bool:
-    """Return whether every attribute of ``tag`` holds."""
+def _validate(key: ServiceKey, tag: Mapping[str, object]) -> None:
+    unknown = sorted(set(tag) - _ATTRIBUTES)
+    if unknown:
+        raise InvalidDefinitionError(
+            key,
+            f"unknown {REMOVE_IF_MISSING_TAG} attribute {unknown[0]!r}, expected one of "
+            + ", ".join(sorted(_ATTRIBUTES)),
+        )
+    if not any(tag.get(condition) is not None for condition in _CONDITIONS):
+        raise InvalidDefinitionError(
+            key, f"a {REMOVE_IF_MISSING_TAG} tag needs one of service, class_ or package"
+        )
+
+
+def _unmet(builder: ContainerBuilder, tag: Mapping[str, object]) -> str | None:
+    """Return why ``tag`` does not hold, or ``None`` when every condition does."""
     service = tag.get("service")
     if service is not None:
-        qualifier = tag.get("qualifier")
-        if not _alias_or_definition_of(state, (cast("type", service), qualifier)):
-            return False
+        key = (cast("type", service), cast("Hashable | None", tag.get("qualifier")))
+        if not _resolves(builder, key):
+            return f"service {key_name(key)} is missing"
     class_path = tag.get("class_")
     if class_path is not None and not _class_importable(cast("str", class_path)):
-        return False
+        return f"class {class_path} is missing"
     package = tag.get("package")
-    return not (package is not None and not _package_installed(cast("str", package)))
+    if package is not None and not _package_installed(cast("str", package)):
+        return f"package {package} is missing"
+    return None
 
 
-def _alias_or_definition_of(state: BuildState, key: ServiceKey) -> bool:
-    """Return whether ``key`` resolves — follows aliases without looping."""
-    seen: set[ServiceKey] = set()
-    while key in state.aliases and key not in seen:
-        seen.add(key)
-        key = state.aliases[key]
-    return state.store.get(key) is not None
+def _resolves(builder: ContainerBuilder, key: ServiceKey) -> bool:
+    """Return whether ``key`` reaches a definition, through its aliases.
+
+    ``has`` answers true for an alias whose target is gone, so the aliases are
+    followed to the definition.
+    """
+    try:
+        _ = builder.find_definition(*key)
+    except UnknownServiceError:
+        return False
+    return True
 
 
 def _class_importable(path: str) -> bool:
@@ -100,22 +135,8 @@ def _class_importable(path: str) -> bool:
 
 def _package_installed(name: str) -> bool:
     """Return whether ``name`` is an installed distribution."""
-    # Local import to keep the module import graph minimal.
-    from importlib.metadata import PackageNotFoundError, distribution  # noqa: PLC0415
-
     try:
         _ = distribution(name)
     except PackageNotFoundError:
         return False
     return True
-
-
-def _remove_with_aliases(state: BuildState, key: ServiceKey) -> None:
-    """Drop ``key`` from the store and every alias pointing at it (recursively)."""
-    if state.store.get(key) is not None:
-        state.store.remove(key)
-    dangling = [alias for alias, target in state.aliases.items() if target == key]
-    for alias in dangling:
-        del state.aliases[alias]
-        _ = state.alias_origins.pop(alias, None)
-        _remove_with_aliases(state, alias)

@@ -8,7 +8,7 @@ __all__ = ["CircularBundleDependencyError"]
 
 
 class CircularBundleDependencyError(DependencyInjectionError):
-    """Bundles depend on each other, through ``requires`` or ``optional``, in a loop."""
+    """Bundles depend on each other in a loop: through ``@required_bundle``, or ``AliasOf``."""
 
     cycle: tuple[str, ...]
 

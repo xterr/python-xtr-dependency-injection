@@ -1,23 +1,33 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from typing_extensions import override
 
 from xtr_dependency_injection.builder import Origin
 from xtr_dependency_injection.builder.container_builder import ContainerBuilder
-from xtr_dependency_injection.builder.pass_stage import PassStage
 from xtr_dependency_injection.builder.service_configurator import BuildState, ServiceConfigurator
 from xtr_dependency_injection.bundle import Bundle, as_bundle
+from xtr_dependency_injection.compiler.check_alias_validity_pass import CheckAliasValidityPass
+from xtr_dependency_injection.compiler.pass_stage import PassStage
+from xtr_dependency_injection.compiler.resettable_service_pass import ResettableServicePass
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass
 from xtr_dependency_injection.decorator.remove_if_missing import (
     REMOVE_IF_MISSING_TAG,
     remove_if_missing,
 )
 from xtr_dependency_injection.kernel.kernel import (
+    BUNDLE_PASS_PRIORITY,
     Kernel,
-    _run_compiler_passes,
-    collect_compiler_passes,
+    _prepare_container,
 )
+from xtr_dependency_injection.kernel.kernel_bundle import KernelBundle
 from xtr_dependency_injection.scan.scanned_object import ScannedObject
+
+if TYPE_CHECKING:
+    from xtr_dependency_injection.bundle.bundle import AnyBundle
+
+RAN: list[str] = []
 
 
 def _state(*bundles: str) -> BuildState:
@@ -28,82 +38,87 @@ def _scanned(obj: object, order: int = 1) -> ScannedObject:
     return ScannedObject(obj, f"tests:{getattr(obj, '__qualname__', obj)}", None, order)
 
 
-def test_the_five_stages_are_ordered_early_to_late() -> None:
-    assert [s.name for s in PassStage] == [
-        "BEFORE_OPTIMIZATION",
-        "OPTIMIZE",
-        "BEFORE_REMOVING",
-        "REMOVE",
-        "AFTER_REMOVING",
-    ]
+def _compile(state: BuildState, bundles: list[AnyBundle], scanned: list[ScannedObject]) -> None:
+    RAN.clear()
+    _prepare_container(state, bundles, scanned)
+    state.compiler.compile(state)
+
+
+@compiler_pass(stage=PassStage.AFTER_REMOVING, priority=99)
+class Last:
+    def process(self, builder: ContainerBuilder) -> None:
+        del builder
+        RAN.append("after")
+
+
+@compiler_pass(stage=PassStage.BEFORE_REMOVING)
+class BeforeRemoving:
+    def process(self, builder: ContainerBuilder) -> None:
+        del builder
+        RAN.append("before_removing")
+
+
+@compiler_pass(stage=PassStage.OPTIMIZE)
+class Optimize:
+    def process(self, builder: ContainerBuilder) -> None:
+        del builder
+        RAN.append("optimize")
+
+
+@compiler_pass
+class Early:
+    def process(self, builder: ContainerBuilder) -> None:
+        del builder
+        RAN.append("early")
+
+
+@compiler_pass(priority=10)
+class High:
+    def process(self, builder: ContainerBuilder) -> None:
+        del builder
+        RAN.append("high")
 
 
 def test_stages_run_before_optimization_before_optimize_before_removing() -> None:
-    ran: list[str] = []
-
-    @compiler_pass(stage=PassStage.AFTER_REMOVING, priority=99)
-    def last(_builder: object) -> None:
-        ran.append("after")
-
-    @compiler_pass(stage=PassStage.BEFORE_REMOVING)
-    def before_removing(_builder: object) -> None:
-        ran.append("before_removing")
-
-    @compiler_pass(stage=PassStage.OPTIMIZE)
-    def optimize(_builder: object) -> None:
-        ran.append("optimize")
-
-    @compiler_pass(stage=PassStage.BEFORE_OPTIMIZATION)
-    def early(_builder: object) -> None:
-        ran.append("early")
-
-    _run_compiler_passes(
+    _compile(
         _state(),
         [],
-        [
-            _scanned(last, order=1),
-            _scanned(before_removing, order=2),
-            _scanned(optimize, order=3),
-            _scanned(early, order=4),
-        ],
-        [],
+        [_scanned(Last, 1), _scanned(BeforeRemoving, 2), _scanned(Optimize, 3), _scanned(Early, 4)],
     )
 
-    assert ran == ["early", "optimize", "before_removing", "after"]
+    assert RAN == ["early", "optimize", "before_removing", "after"]
 
 
-def test_priority_within_a_stage_runs_higher_first() -> None:
-    ran: list[str] = []
+def test_priority_within_a_stage_runs_higher_first_then_scan_order() -> None:
+    _compile(_state(), [], [_scanned(Early, 1), _scanned(High, 2)])
 
-    @compiler_pass(stage=PassStage.BEFORE_OPTIMIZATION, priority=1)
-    def low(_builder: object) -> None:
-        ran.append("low")
-
-    @compiler_pass(stage=PassStage.BEFORE_OPTIMIZATION, priority=10)
-    def high(_builder: object) -> None:
-        ran.append("high")
-
-    _run_compiler_passes(
-        _state(),
-        [],
-        [_scanned(low, order=1), _scanned(high, order=2)],
-        [],
-    )
-
-    assert ran[:2] == ["high", "low"]
+    assert RAN == ["high", "early"]
 
 
-def test_a_remove_stage_pass_sees_definitions_removed_by_before_removing() -> None:
-    seen: dict[str, bool] = {}
+@compiler_pass
+class RecordsOrigin:
+    def process(self, builder: ContainerBuilder) -> None:
+        RAN.append(str(builder._origin))
 
-    @remove_if_missing(class_="no_such_module_xyz_15:Missing")
-    class Dropped:
-        pass
 
-    @compiler_pass(stage=PassStage.REMOVE)
-    def check(builder: ContainerBuilder) -> None:
-        seen["still_there"] = builder.has_definition(Dropped)
+def test_a_scanned_pass_runs_as_the_application() -> None:
+    _compile(_state(), [], [_scanned(RecordsOrigin)])
 
+    assert [f"app tests:{RecordsOrigin.__qualname__}"] == RAN
+
+
+@remove_if_missing(class_="no_such_module_xyz_15:Missing")
+class Dropped:
+    pass
+
+
+@compiler_pass
+class SeesDropped:
+    def process(self, builder: ContainerBuilder) -> None:
+        RAN.append(f"still there: {builder.has_definition(Dropped)}")
+
+
+def test_a_before_optimization_pass_sees_the_missing_dependencies_removed() -> None:
     state = _state()
     _ = (
         ServiceConfigurator(state, Origin("app", "tests:Dropped"))
@@ -111,22 +126,23 @@ def test_a_remove_stage_pass_sees_definitions_removed_by_before_removing() -> No
         .add_tag(REMOVE_IF_MISSING_TAG, class_="no_such_module_xyz_15:Missing")
     )
 
-    _run_compiler_passes(state, [], [_scanned(check)], [])
+    _compile(state, [], [_scanned(SeesDropped)])
 
-    assert seen == {"still_there": False}
+    assert RAN == ["still there: False"]
 
 
 class _NoOverrideBundle(Bundle):
     pass
 
 
-class _OverridingBundle(Bundle):
-    ran: bool = False
+class _ProcessingBundle(Bundle):
+    @override
+    def build(self, builder: ContainerBuilder) -> None:
+        builder.add_compiler_pass(High())
 
     @override
     def process(self, builder: ContainerBuilder) -> None:
-        del builder
-        type(self).ran = True
+        RAN.append(f"process as {builder._origin}")
 
 
 @as_bundle("no_override")
@@ -134,82 +150,51 @@ class NoOverrideBundle(_NoOverrideBundle):
     pass
 
 
-@as_bundle("overriding")
-class OverridingBundle(_OverridingBundle):
+@as_bundle("processing")
+class ProcessingBundle(_ProcessingBundle):
     pass
 
 
-def test_bundle_process_runs_only_when_the_class_overrides_it() -> None:
-    OverridingBundle.ran = False
-    state = _state("no_override", "overriding")
+def test_a_bundle_is_a_compiler_pass_only_when_it_overrides_process() -> None:
+    state = _state("no_override", "processing")
+    no_override, processing = NoOverrideBundle(), ProcessingBundle()
 
-    _run_compiler_passes(state, [NoOverrideBundle(), OverridingBundle()], [], [])
+    _prepare_container(state, [no_override, processing], [])
 
-    assert OverridingBundle.ran is True
+    passes = state.compiler.get_pass_config().get_before_optimization_passes()
+    assert processing in passes
+    assert no_override not in passes
 
 
-def test_collect_records_the_built_in_kernel_passes_in_stage_order() -> None:
-    collected = collect_compiler_passes(_state(), [], [], [])
+def test_a_bundle_runs_as_itself_after_every_other_before_optimization_pass() -> None:
+    _compile(_state("processing"), [ProcessingBundle()], [_scanned(Early)])
 
-    descriptions = [request.description for request in collected]
-    assert descriptions == [
-        "kernel:resolve_decorations",
-        "kernel:remove_if_missing",
-        "kernel:validate_aliases",
-    ]
-    stages = {request.description: request.stage for request in collected}
-    assert stages["kernel:resolve_decorations"] == PassStage.OPTIMIZE
-    assert stages["kernel:remove_if_missing"] == PassStage.BEFORE_REMOVING
-    assert stages["kernel:validate_aliases"] == PassStage.AFTER_REMOVING
+    assert RAN == ["high", "early", "process as bundle processing"]
+    assert BUNDLE_PASS_PRIORITY == -10000
 
 
 def test_add_compiler_pass_registers_a_pass_in_the_build_phase() -> None:
     state = _state()
     state.phase = "build"
-    calls: list[str] = []
-
-    def scanner_pass(_builder: ContainerBuilder) -> None:
-        calls.append("build-added")
 
     ContainerBuilder(state, Origin("bundle", "scan")).add_compiler_pass(
-        scanner_pass, stage=PassStage.AFTER_REMOVING, priority=7
+        Early(), stage=PassStage.AFTER_REMOVING, priority=7
     )
 
-    assert len(state.compiler_passes) == 1
-    request = state.compiler_passes[0]
-    assert request.stage == PassStage.AFTER_REMOVING
-    assert request.priority == 7
-    assert request.description.endswith("scanner_pass")
+    (added,) = state.compiler.get_pass_config().get_after_removing_passes()
+    assert isinstance(added, Early)
 
 
-def test_a_bundles_added_compiler_pass_is_collected_after_its_process() -> None:
-    calls: list[str] = []
+def test_the_kernel_bundle_registers_its_passes() -> None:
+    state = _state()
 
-    def added(_builder: ContainerBuilder) -> None:
-        calls.append("added")
+    _prepare_container(state, [KernelBundle()], [])
 
-    class _ProcessingBundle(Bundle):
-        @override
-        def build(self, builder: ContainerBuilder) -> None:
-            builder.add_compiler_pass(added, stage=PassStage.BEFORE_OPTIMIZATION)
-
-        @override
-        def process(self, builder: ContainerBuilder) -> None:
-            del builder
-            calls.append("process")
-
-    @as_bundle("processing")
-    class ProcessingBundle(_ProcessingBundle):
-        pass
-
-    state = _state("processing")
-    state.phase = "build"
-    bundle = ProcessingBundle()
-    bundle.build(ContainerBuilder(state, Origin("bundle", "processing")))
-
-    _run_compiler_passes(state, [bundle], [], [])
-
-    assert calls == ["process", "added"]
+    config = state.compiler.get_pass_config()
+    assert any(
+        isinstance(p, ResettableServicePass) for p in config.get_before_optimization_passes()
+    )
+    assert any(isinstance(p, CheckAliasValidityPass) for p in config.get_before_removing_passes())
 
 
 def test_a_remove_if_missing_definition_is_absent_from_a_built_container() -> None:

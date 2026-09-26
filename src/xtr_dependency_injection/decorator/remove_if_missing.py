@@ -1,7 +1,7 @@
 """Mark a class definition to be removed when a dependency is missing.
 
 The ``container.remove_if_missing`` tag: a definition carrying this tag is
-dropped by the built-in ``BEFORE_REMOVING`` pass when any of its conditions
+dropped by ``RemoveMissingDependenciesPass`` when any of its conditions
 is unmet. The decorator is repeatable: each call appends one tag attribute
 mapping, and every tag must hold.
 """
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 __all__ = ["REMOVE_IF_MISSING_TAG", "markers_of", "remove_if_missing"]
 
 REMOVE_IF_MISSING_TAG: Final = "container.remove_if_missing"
-"""The tag name; the built-in BEFORE_REMOVING pass reads it."""
+"""The tag name; ``RemoveMissingDependenciesPass`` reads it."""
 
 _ATTRIBUTE: Final = "__xtr_remove_if_missing__"
 

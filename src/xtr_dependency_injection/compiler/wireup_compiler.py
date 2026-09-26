@@ -9,14 +9,15 @@ priority, highest first, then in declaration order.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from itertools import count
 from typing import TYPE_CHECKING, cast
 
 import wireup
 from wireup.errors import WireupError
 
+from xtr_dependency_injection.config.env_placeholder import env_placeholders_in
 from xtr_dependency_injection.exception import ContainerCompilationError
 from xtr_dependency_injection.exception._naming import key_name, qualified_name
 
@@ -26,12 +27,15 @@ from .registration import (
     _box_type,
     _clone_function,
     _decorating_factory,
+    _env_resolving_factory,
     _map_result,
+    _resolving_instance_factory,
     _synthesize_class_factory,
 )
+from .resettable_service_pass import RESET_TAG
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Iterator, Sequence
 
     from wireup import AsyncContainer
 
@@ -47,6 +51,7 @@ class Decoration:
     decorator: type | Callable[..., object]
     inner_parameter: str
     name: str
+    arguments: Mapping[str, object] = field(default_factory=dict)
 
 
 def emission_order(definitions: Sequence[Definition]) -> list[Definition]:
@@ -171,7 +176,7 @@ def _emit(
         if as_is is not None:
             return [as_is]
     factory, implementation = _factory_for(
-        definition.provider, instance=definition.kind == "instance"
+        definition.provider, instance=definition.kind == "instance", arguments=definition.arguments
     )
     if hook is not None:
         tracked = _tracking(track, hook)
@@ -181,22 +186,18 @@ def _emit(
         box = _box_type(next(boxes))
         boxed = _map_result(factory, box, provides=box)
         emitted.append(wireup.injectable(boxed, lifetime=lifetime))
-        decorator, implementation = _factory_for(decoration.decorator, instance=False)
+        decorator, implementation = _factory_for(
+            decoration.decorator, instance=False, arguments=decoration.arguments
+        )
         factory = _decorating_factory(
             decorator, decoration.inner_parameter, box, provides=implementation
         )
-    # The engine's provided-type kwarg is built through a dict so the literal
-    # kwarg spelling never appears in source (todo 14c acceptance rg pattern).
-    provides_key: str = "as" + "_type"
-    injectable_kwargs: dict[str, object] = {
-        provides_key: provided if provided is not implementation else None
-    }
     emitted.append(
-        wireup.injectable(  # pyright: ignore[reportCallIssue]  # ty: ignore[no-matching-overload]
+        wireup.injectable(
             factory,
             lifetime=lifetime,
             qualifier=qualifier,
-            **injectable_kwargs,  # pyright: ignore[reportArgumentType]
+            as_type=provided if provided is not implementation else None,
         )
     )
     return emitted
@@ -205,14 +206,11 @@ def _emit(
 def _reset_hook(definition: Definition) -> str | None:
     """Return the ``method`` attribute of the first ``kernel.reset`` tag, else ``None``.
 
-    The ``kernel.reset`` tag carries the method name the
-    ``ServicesResetter`` calls on a service; it defaults to ``"reset"``.
+    The ``kernel.reset`` tag carries the method name the ``ServicesResetter``
+    calls on a service; ``ResettableServicePass`` has checked it is a string.
     """
-    tags = definition.get_tag("kernel.reset")
-    if not tags:
-        return None
-    hook = tags[0].get("method", "reset")
-    return hook if isinstance(hook, str) else "reset"
+    tags = definition.get_tag(RESET_TAG)
+    return cast("str", tags[0]["method"]) if tags else None
 
 
 def _as_is(definition: Definition) -> object | None:
@@ -222,28 +220,41 @@ def _as_is(definition: Definition) -> object | None:
     factory synthesized by :func:`_factory_for`.
     """
     provided, qualifier = definition.key
-    if definition.kind == "instance":
-        provides_key: str = "as" + "_type"
-        instance_kwargs: dict[str, object] = {provides_key: provided}
-        return wireup.instance(definition.provider, qualifier=qualifier, **instance_kwargs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    if definition.kind == "instance" and not env_placeholders_in(definition.provider):
+        return wireup.instance(definition.provider, qualifier=qualifier, as_type=provided)
     return None
 
 
-def _factory_for(provider: object, *, instance: bool) -> tuple[Callable[..., object], type]:
+def _factory_for(
+    provider: object, *, instance: bool, arguments: Mapping[str, object]
+) -> tuple[Callable[..., object], type]:
     """Return a factory for ``provider``, and the type it produces.
 
     For an instance we lean on ``wireup.instance``: the returned factory is a
     marked function, but ``_map_result`` / ``_decorating_factory`` wrap it
     into an unmarked clone, and the outer ``wireup.injectable`` call re-marks
-    that clone with the definition's key. So the marker never surfaces.
+    that clone with the definition's key. So the marker never surfaces. An
+    instance holding environment placeholders gets a factory resolving them
+    instead; a class or function with ``Autowire(param=/env=)`` parameters a
+    factory resolving those arguments before the call.
     """
     if instance:
         implementation = type(provider)
+        if env_placeholders_in(provider):
+            return _resolving_instance_factory(provider), implementation
         return wireup.instance(provider, as_type=implementation), implementation
     if isinstance(provider, type):
-        return _synthesize_class_factory(provider), provider
+        factory = _synthesize_class_factory(provider)
+        resolving = _env_resolving_factory(
+            provider, factory, provides=provider, arguments=arguments
+        )
+        return resolving, provider
     function = cast("Callable[..., object]", provider)
-    return _clone_function(function), key_type(function, None)
+    implementation = key_type(function)
+    factory = _env_resolving_factory(
+        function, _clone_function(function), provides=implementation, arguments=arguments
+    )
+    return factory, implementation
 
 
 def _tracking(track: Callable[[object, str], None], method: str) -> Callable[[object], object]:
@@ -255,10 +266,20 @@ def _tracking(track: Callable[[object, str], None], method: str) -> Callable[[ob
 
 
 def _note_origins(error: WireupError, definitions: Sequence[Definition]) -> None:
+    """Note where every definition the engine's message mentions came from.
+
+    The engine names a class by its dotted path and a factory by its
+    qualified name (ours are named after what they build); a bare class name
+    would also match an unrelated class of that name from another module.
+    """
     message = str(error)
     for definition in definitions:
-        name = getattr(definition.key[0], "__name__", None)
-        if isinstance(name, str) and re.search(rf"\b{re.escape(name)}\b", message):
+        provided = definition.key[0]
+        module = getattr(provided, "__module__", None)
+        qualname = getattr(provided, "__qualname__", None)
+        if not (isinstance(module, str) and isinstance(qualname, str)):
+            continue
+        if f"{module}.{qualname}" in message or f"<function {qualname} at " in message:
             error.add_note(f"{key_name(definition.key)} is defined by {definition.origin}")
 
 

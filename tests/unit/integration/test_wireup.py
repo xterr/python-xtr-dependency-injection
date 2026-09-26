@@ -5,15 +5,21 @@ from dataclasses import dataclass
 import pytest
 import wireup
 
+from tests.fixtures.app_env import MailBundle, Mailer, PortReader
 from tests.fixtures.app_kernel_late import LateService
 from tests.support.bundles import EchoBundle, EchoConfig
 from xtr_dependency_injection import Bundle, Kernel, as_bundle, required_bundle
 from xtr_dependency_injection.exception import (
     ConfigProviderError,
     MissingBundleError,
+    ParameterConflictError,
     UnknownConfigTypeError,
 )
-from xtr_dependency_injection.integration.wireup import engine_container, injectables
+from xtr_dependency_injection.integration.wireup import (
+    create_container,
+    engine_container,
+    injectables,
+)
 from xtr_dependency_injection.kernel import KernelInterface
 
 pytestmark = pytest.mark.anyio
@@ -77,8 +83,8 @@ def test_a_config_no_listed_bundle_declares_is_refused() -> None:
         _ = injectables([QuietBundle], configs=[EchoConfig()])
 
 
-def test_parameters_from_a_bundle_need_the_kernel() -> None:
-    with pytest.raises(ConfigProviderError, match="parameters need the kernel") as caught:
+def test_parameters_from_a_bundle_need_create_container() -> None:
+    with pytest.raises(ConfigProviderError, match="parameters need create_container") as caught:
         _ = injectables([EchoBundle])
 
     assert caught.value.provider == "bundle echo"
@@ -117,3 +123,35 @@ async def test_engine_container_returns_the_wireup_container_from_a_booted_kerne
 def test_engine_container_refuses_a_foreign_kernel() -> None:
     with pytest.raises(TypeError, match="CompiledKernel or BootedKernel"):
         _ = engine_container(object())  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+
+
+async def test_create_container_carries_every_parameter() -> None:
+    container = create_container(
+        [EchoBundle],
+        scan=["tests.fixtures.app_parameters"],
+        parameters={"own": {"flag": True}},
+    )
+
+    assert container.config.get("echo.greeting") == EchoConfig().greeting
+    assert container.config.get("app.name") == "fixture"
+    assert container.config.get("own.flag") is True
+    assert container.config.get("kernel.name") == "standalone"
+
+
+async def test_create_container_resolves_environment_variables() -> None:
+    container = create_container(
+        [MailBundle],
+        scan=["tests.fixtures.app_env"],
+        environ={"MAIL_HOST": "mx", "MAIL_PORT": "2525", "MAIL_USER": "u", "MAIL_WORKERS": "2"},
+    )
+
+    reader = await container.get(PortReader)
+    mailer = await container.get(Mailer)
+
+    assert reader.port == 2525
+    assert (mailer.config.host, mailer.config.port, mailer.config.user) == ("mx", 2525, "u")
+
+
+def test_create_container_refuses_a_parameter_set_twice() -> None:
+    with pytest.raises(ParameterConflictError):
+        _ = create_container([EchoBundle], parameters={"echo": {"greeting": "again"}})

@@ -120,7 +120,7 @@ def test_every_queue_marker_goes_to_its_queue() -> None:
 
     assert [s.obj for s in result.configure] == [hooks.configured]
     assert [s.obj for s in result.parameters] == [hooks.provided]
-    assert [s.obj for s in result.compiler_passes] == [hooks.adjusted]
+    assert [s.obj for s in result.compiler_passes] == [hooks.Adjusted]
     assert [s.obj for s in result.on_boot] == [hooks.booted]
     assert [s.obj for s in result.on_shutdown] == [hooks.stopped]
     assert [s.obj for s in result.decorators] == [hooks.Wrapping]

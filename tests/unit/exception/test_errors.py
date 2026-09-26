@@ -16,6 +16,7 @@ from xtr_dependency_injection.exception import (
     DependencyInjectionError,
     DuplicateBundleError,
     DuplicateServiceError,
+    InvalidDefinitionError,
     InvalidEnvironmentError,
     InvalidEnvironmentVariableError,
     KernelAlreadyBootedError,
@@ -24,6 +25,7 @@ from xtr_dependency_injection.exception import (
     ParameterConflictError,
     ParameterNotFoundError,
     ResourceImportError,
+    ServiceCircularReferenceError,
     ServiceNotFoundError,
     ServiceResolutionError,
     UnknownConfigTypeError,
@@ -150,7 +152,7 @@ def test_invalid_environment_variable_error_names_the_conversion() -> None:
     error = InvalidEnvironmentVariableError("PORT", int, "abc")
 
     assert (error.name, error.cast, error.value) == ("PORT", int, "abc")
-    assert str(error) == "environment variable PORT='abc' is not a valid int"
+    assert str(error) == "environment variable PORT is not a valid int"
 
 
 def test_duplicate_service_error_names_the_key_and_both_origins() -> None:
@@ -248,3 +250,19 @@ def test_service_resolution_error_appends_advice_when_given() -> None:
     error = ServiceResolutionError((Sample, None), "Scope mismatch", advice="enter a scope")
 
     assert str(error) == f"failed to resolve {__name__}.Sample: Scope mismatch\nenter a scope"
+
+
+def test_an_invalid_definition_names_its_key_and_reason() -> None:
+    error = InvalidDefinitionError((Sample, "q"), "unknown lifetime 'forever'")
+
+    assert (error.key, error.reason) == ((Sample, "q"), "unknown lifetime 'forever'")
+    assert str(error) == f"invalid definition of {__name__}.Sample['q']: unknown lifetime 'forever'"
+
+
+def test_a_circular_reference_names_its_path() -> None:
+    error = ServiceCircularReferenceError(
+        (Sample, None), ((Sample, None), (int, None), (Sample, None))
+    )
+
+    assert error.path[-1] == (Sample, None)
+    assert str(error).endswith(f"path: {__name__}.Sample -> int -> {__name__}.Sample")

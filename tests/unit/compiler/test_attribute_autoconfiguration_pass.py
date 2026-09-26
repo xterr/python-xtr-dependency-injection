@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 
 from xtr_dependency_injection.builder import Origin
-from xtr_dependency_injection.builder.autoconfigurator import (
-    Apply,
-    Autoconfigurator,
-    run_autoconfigurators,
-)
+from xtr_dependency_injection.builder.autoconfigurator import Apply, Autoconfigurator
+from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.service_configurator import BuildState, ServiceConfigurator
+from xtr_dependency_injection.compiler.attribute_autoconfiguration_pass import (
+    AttributeAutoconfigurationPass,
+)
 from xtr_dependency_injection.scan.scanned_object import ScannedObject
 
 
@@ -28,32 +28,36 @@ def _ignore(_obj: object, _meta: object, _services: ServiceConfigurator) -> None
     pass
 
 
-def _candidates() -> list[ScannedObject]:
-    return [
-        ScannedObject(Tagged, "tests:Tagged", None, 1),
-        ScannedObject(Untagged, "tests:Untagged", None, 2),
-    ]
+def _state(*autoconfigurators: Autoconfigurator) -> BuildState:
+    state = BuildState(env="dev", debug=False, bundles=("kernel", "alpha", "beta"), configs={})
+    state.phase = "process"
+    state.autoconfigurators.extend(autoconfigurators)
+    state.candidates.extend(
+        [
+            ScannedObject(Tagged, "tests:Tagged", None, 1),
+            ScannedObject(Untagged, "tests:Untagged", None, 2),
+        ]
+    )
+    return state
+
+
+def _process(state: BuildState) -> None:
+    AttributeAutoconfigurationPass().process(ContainerBuilder(state, Origin("kernel", "kernel")))
 
 
 def test_apply_runs_once_per_metadata_item_of_matching_candidates() -> None:
     applied: list[tuple[object, object]] = []
-    state = BuildState(env="dev", debug=False, bundles=("alpha",), configs={})
 
     def record(obj: object, meta: object, _services: ServiceConfigurator) -> None:
         applied.append((obj, meta))
 
-    run_autoconfigurators(
-        [Autoconfigurator("alpha", _tags, record)],
-        _candidates(),
-        lambda owner, _candidate: ServiceConfigurator(state, Origin("bundle", owner)),
-    )
+    _process(_state(Autoconfigurator("alpha", _tags, record)))
 
     assert applied == [(Tagged, "a"), (Tagged, "b")]
 
 
 def test_autoconfigurators_are_the_outer_loop() -> None:
     seen: list[str] = []
-    state = BuildState(env="dev", debug=False, bundles=("alpha", "beta"), configs={})
 
     def everything(obj: object) -> tuple[object]:
         return (obj,)
@@ -64,44 +68,35 @@ def test_autoconfigurators_are_the_outer_loop() -> None:
 
         return record
 
-    run_autoconfigurators(
-        [
+    _process(
+        _state(
             Autoconfigurator("alpha", everything, seen_by("alpha")),
             Autoconfigurator("beta", everything, seen_by("beta")),
-        ],
-        _candidates(),
-        lambda owner, _candidate: ServiceConfigurator(state, Origin("bundle", owner)),
+        )
     )
 
     assert [entry.split()[0] for entry in seen] == ["alpha", "alpha", "beta", "beta"]
 
 
-def test_the_configurator_names_the_candidate() -> None:
-    requested: list[tuple[str, str]] = []
-    state = BuildState(env="dev", debug=False, bundles=("alpha",), configs={})
+def test_what_apply_defines_carries_the_bundle_and_the_candidate() -> None:
+    def register(obj: object, _meta: object, services: ServiceConfigurator) -> None:
+        if isinstance(obj, type):
+            _ = services.set(obj)
 
-    def configurator_for(owner: str, candidate: ScannedObject) -> ServiceConfigurator:
-        requested.append((owner, candidate.name))
-        return ServiceConfigurator(state, Origin("bundle", owner))
+    state = _state(Autoconfigurator("alpha", _tags, register))
 
-    run_autoconfigurators(
-        [Autoconfigurator("alpha", _tags, _ignore)], _candidates(), configurator_for
-    )
+    _process(state)
 
-    assert requested == [("alpha", "tests:Tagged")]
+    definition = state.store.get((Tagged, None))
+    assert definition is not None
+    assert definition.origin == Origin("bundle", "alpha", "via autoconfigure of tests:Tagged")
 
 
 def test_a_failing_reader_propagates_with_a_note() -> None:
     def broken(_obj: object) -> tuple[object, ...]:
         raise RuntimeError("bug")
 
-    state = BuildState(env="dev", debug=False, bundles=("alpha",), configs={})
-
     with pytest.raises(RuntimeError, match="bug") as caught:
-        run_autoconfigurators(
-            [Autoconfigurator("alpha", broken, _ignore)],
-            _candidates(),
-            lambda owner, _c: ServiceConfigurator(state, Origin("bundle", owner)),
-        )
+        _process(_state(Autoconfigurator("alpha", broken, _ignore)))
 
     assert "of bundle alpha on tests:Tagged" in caught.value.__notes__[0]

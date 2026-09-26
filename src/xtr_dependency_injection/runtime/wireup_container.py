@@ -13,12 +13,20 @@ from typing_extensions import override
 from wireup.errors import UnknownParameterError
 from xtr_service_contracts import ContainerInterface
 
-from xtr_dependency_injection.compiler._wireup_bridge import is_registered
+from xtr_dependency_injection.compiler._wireup_bridge import is_registered, parameters_of
+from xtr_dependency_injection.config.env_placeholder import (
+    ENV_PARAMETERS_ROOT,
+    env_placeholders_in,
+    resolve_env_placeholders,
+)
 from xtr_dependency_injection.exception import (
+    EnvPlaceholderError,
     ParameterNotFoundError,
     ServiceNotFoundError,
     ServiceResolutionError,
 )
+
+from .env_var_processors_locator import EnvVarProcessorsLocator
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
@@ -65,10 +73,67 @@ class WireupContainer(ContainerInterface):
 
     @override
     def get_parameter(self, name: str, /) -> object:
+        """Return the parameter ``name``.
+
+        Raises:
+            ParameterNotFoundError: If no such parameter exists.
+            EnvPlaceholderError: If the parameter holds an environment
+                placeholder: it is resolved when injected, or through
+                :meth:`resolve_env_placeholders`, never read raw.
+        """
+        try:
+            value = cast("object", self._container.config.get(name))
+        except UnknownParameterError as error:
+            raise ParameterNotFoundError(name) from error
+        held = env_placeholders_in(value)
+        if held:
+            reason = (
+                f"parameter {name!r} holds it; inject the parameter, or await "
+                "resolve_env_placeholders(container.get_parameter_raw(name))"
+            )
+            raise EnvPlaceholderError(held[0].expression, reason)
+        return value
+
+    def get_parameter_raw(self, name: str, /) -> object:
+        """Return the parameter ``name`` as stored, environment placeholders included.
+
+        Raises:
+            ParameterNotFoundError: If no such parameter exists.
+        """
         try:
             return cast("object", self._container.config.get(name))
         except UnknownParameterError as error:
             raise ParameterNotFoundError(name) from error
+
+    def get_parameters(self) -> dict[str, object]:
+        """Return every parameter, nested, as stored — environment placeholders included."""
+        return {
+            name: value
+            for name, value in parameters_of(self._container).items()
+            if name != ENV_PARAMETERS_ROOT
+        }
+
+    async def get_env(self, name: str, /) -> object:
+        """Return the value of the environment variable expression ``name`` (``"int:PORT"``).
+
+        Raises:
+            EnvPlaceholderError: If a prefix names no processor.
+            MissingEnvironmentVariableError: If a variable is not set.
+            InvalidEnvironmentVariableError: If a processor refuses a value.
+        """
+        processors = await self.get(EnvVarProcessorsLocator)
+        return processors.get_env(name)
+
+    async def resolve_env_placeholders(self, value: T, /) -> T:
+        """Return ``value`` with every environment placeholder it holds resolved.
+
+        Only what holds a placeholder is rebuilt; a value without one is
+        returned as is, and no processor is built for it.
+        """
+        if not env_placeholders_in(value):
+            return value
+        processors = await self.get(EnvVarProcessorsLocator)
+        return cast("T", resolve_env_placeholders(value, processors.get_env))
 
     @override
     def has_parameter(self, name: str, /) -> bool:

@@ -8,15 +8,13 @@ container. The steps are:
 1. environment — ``APP_ENV`` / ``APP_DEBUG`` or the arguments;
 2. bundles — activation from ``bundles.py`` + ``@required_bundle``, in order;
 3. early scan — the application's resources and the bundles';
-4. ``build`` — every bundle's ``build(builder)``, in bundle order;
-5. configs — defaults, application base providers, prepends collected from
-   every bundle's ``prepend_extension(builder)``, and application transforms;
-6. ``load_extension`` — every bundle defines its services from its resolved config;
-7. late scan — what bundles asked to scan while loading;
-8. marked definitions — what carries ``@as_service`` / ``@as_alias``;
-9. autoconfigure — bundles react to every scanned candidate;
-10. compiler passes — every bundle's ``process`` and the ``@compiler_pass`` functions;
-11. compile — the wireup container.
+4. prepare — every bundle overriding ``process`` becomes a compiler pass, every
+   bundle's ``build(builder)`` runs, then the scanned ``@compiler_pass``
+   classes are registered;
+5. compiler passes — the merge pass (``prepend_extension``, configs,
+   ``load_extension``, late scan, marked definitions), then every stage of the
+   :class:`~xtr_dependency_injection.compiler.pass_config.PassConfig`;
+6. compile — the wireup container.
 """
 
 from __future__ import annotations
@@ -24,70 +22,48 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.util
-import inspect
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Literal, cast, final
+from typing import TYPE_CHECKING, Final, cast, final
 
-from xtr_dependency_injection.builder.autoconfigurator import run_autoconfigurators
-from xtr_dependency_injection.builder.conflict_policy import record_alias
+from xtr_dependency_injection.builder._origins import origin_of, scanned_origin
 from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.definition import Definition, Origin, ServiceKey
-from xtr_dependency_injection.builder.pass_stage import PassStage
-from xtr_dependency_injection.builder.service_configurator import (
-    BuildState,
-    CompilerPassRequest,
-    ServiceConfigurator,
-)
+from xtr_dependency_injection.builder.service_configurator import BuildState
 from xtr_dependency_injection.bundle import KERNEL_BUNDLE, NoConfig
 from xtr_dependency_injection.bundle.bundle import AnyBundle, Bundle
 from xtr_dependency_injection.bundle.bundle_resolver import resolve_bundles
-from xtr_dependency_injection.compiler._wireup_bridge import key_type
-from xtr_dependency_injection.compiler.check_alias_validity_pass import validate_aliases_pass
-from xtr_dependency_injection.compiler.decorator_service_pass import resolve_decorations_pass
+from xtr_dependency_injection.compiler.merge_extension_configuration_pass import (
+    MergeExtensionConfigurationPass,
+)
+from xtr_dependency_injection.compiler.pass_stage import PassStage
 from xtr_dependency_injection.compiler.priority_tagged_service import by_priority
-from xtr_dependency_injection.compiler.remove_missing_dependencies_pass import (
-    remove_if_missing_pass,
-)
-from xtr_dependency_injection.compiler.resolve_instanceof_conditionals_pass import (
-    apply_autoconfigure_rules,
-)
 from xtr_dependency_injection.compiler.wireup_compiler import (
     Decoration,
     compile_container,
     emission_order,
     emit_injectables,
 )
-from xtr_dependency_injection.config.config_resolver import ResolvedConfigs, resolve_configs
-from xtr_dependency_injection.config.env import env as read_env
+from xtr_dependency_injection.config.env_placeholder import ENV_PARAMETERS_ROOT, env_tokens
 from xtr_dependency_injection.config.parameters import call_parameters, merge_parameters
-from xtr_dependency_injection.decorator.as_alias import aliases_of
-from xtr_dependency_injection.decorator.as_service import service_of
-from xtr_dependency_injection.decorator.as_tagged_item import tagged_item_of
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass_of
 from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown_of
-from xtr_dependency_injection.decorator.remove_if_missing import REMOVE_IF_MISSING_TAG
-from xtr_dependency_injection.decorator.remove_if_missing import (
-    markers_of as remove_if_missing_markers_of,
-)
 from xtr_dependency_injection.diagnostics import DefinitionReport
 from xtr_dependency_injection.diagnostics.report import KernelReport, ReportBuilder
 from xtr_dependency_injection.exception import (
     BundleDefinitionError,
     InvalidEnvironmentError,
+    InvalidEnvironmentVariableError,
     ResourceImportError,
 )
 from xtr_dependency_injection.exception._naming import key_name as _naming_key_name
 from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.scan.default_excludes import DEFAULT_EXCLUDES
-from xtr_dependency_injection.scan.scanned_object import ScannedObject
 from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 
-from ._origins import origin_of as _origin_of
-from ._origins import scanned_origin as _scanned_origin
 from .booted_kernel import BootedKernel, call_injected
 from .compiled_kernel import CompiledKernel
 from .kernel_bundle import KernelBundle
@@ -95,15 +71,21 @@ from .kernel_bundle import KernelBundle
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Sequence
 
+    from xtr_dependency_injection.compiler.compiler_pass_interface import CompilerPassInterface
+    from xtr_dependency_injection.scan.scanned_object import ScannedObject
+
 __all__ = [
+    "BUNDLE_PASS_PRIORITY",
     "Assembly",
     "Kernel",
     "Prepared",
     "assemble",
-    "collect_compiler_passes",
     "definition_reports",
     "prepare",
 ]
+
+BUNDLE_PASS_PRIORITY: Final = -10000
+"""Where a bundle overriding ``process`` runs: ``BEFORE_OPTIMIZATION``, after every other pass."""
 
 
 @final
@@ -120,6 +102,7 @@ class Kernel:
         "_concurrent_scoped_access",
         "_debug",
         "_env",
+        "_environ",
         "_exclude",
         "_name",
         "_package",
@@ -139,6 +122,7 @@ class Kernel:
         exclude: Sequence[str] = DEFAULT_EXCLUDES,
         allowed_envs: Sequence[str] | None = None,
         concurrent_scoped_access: bool = False,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         """Store the kernel's recipe.
 
@@ -158,6 +142,9 @@ class Kernel:
                 replaces ``DEFAULT_EXCLUDES``.
             allowed_envs: The only environments the kernel accepts.
             concurrent_scoped_access: Passed to wireup.
+            environ: Where ``APP_ENV``, ``APP_DEBUG`` and every ``env(...)``
+                placeholder are read; ``None`` reads the live process
+                environment. A test gives each kernel its own.
         """
         self._package = package
         self._env = env
@@ -170,6 +157,7 @@ class Kernel:
         self._exclude = tuple(exclude)
         self._allowed_envs = tuple(allowed_envs) if allowed_envs is not None else None
         self._concurrent_scoped_access = concurrent_scoped_access
+        self._environ = environ
 
     @property
     def name(self) -> str:
@@ -179,14 +167,35 @@ class Kernel:
     @property
     def environment(self) -> str:
         """The environment: the argument, else ``APP_ENV``, else ``"dev"``."""
-        return self._env if self._env is not None else os.environ.get("APP_ENV", "dev")
+        return (
+            self._env
+            if self._env is not None
+            else self._environment_variables.get("APP_ENV", "dev")
+        )
 
     @property
     def debug(self) -> bool:
-        """Debug mode: the argument, else ``APP_DEBUG``, else true outside ``"prod"``."""
+        """Debug mode: the argument, else ``APP_DEBUG``, else true outside ``"prod"``.
+
+        Raises:
+            InvalidEnvironmentVariableError: If ``APP_DEBUG`` is neither
+                ``1/true/yes/on`` nor ``0/false/no/off`` or empty.
+        """
         if self._debug is not None:
             return self._debug
-        return read_env("APP_DEBUG", bool, default=self.environment != "prod")
+        value = self._environment_variables.get("APP_DEBUG")
+        if value is None:
+            return self.environment != "prod"
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+        raise InvalidEnvironmentVariableError("APP_DEBUG", bool, value)
+
+    @property
+    def _environment_variables(self) -> Mapping[str, str]:
+        return self._environ if self._environ is not None else os.environ
 
     @property
     def project_dir(self) -> Path:
@@ -212,10 +221,11 @@ class Kernel:
             exclude=self._exclude,
             allowed_envs=self._allowed_envs,
             concurrent_scoped_access=self._concurrent_scoped_access,
+            environ=self._environ,
         )
 
     def build(self) -> CompiledKernel:
-        """Run steps 1 to 11 and return the compiled container, not yet booted."""
+        """Run steps 1 to 6 and return the compiled container, not yet booted."""
         environment, debug = self.environment, self.debug
         _check_environment(environment, self._allowed_envs)
         listed = (
@@ -229,17 +239,16 @@ class Kernel:
             listed=listed,
             resources=self._resources if self._resources is not None else (self._package,),
             exclude=self._exclude,
+            environ=self._environ,
         )
         state = prepared.assembly.state
         parameters = merge_parameters(
-            [
-                *((str(origin), values) for origin, values in state.parameters),
-                *(
-                    (scanned.name, call_parameters(cast("Callable[..., object]", scanned.obj)))
-                    for scanned in prepared.assembly.parameter_providers
-                ),
-            ]
+            (origin.name if origin.kind == "app" else str(origin), values)
+            for origin, values in state.parameters
         )
+        # ``Autowire(env=...)`` injections read their placeholder from here, one
+        # key per token, including those a hook or handler bound later adds.
+        parameters[ENV_PARAMETERS_ROOT] = env_tokens()
         container = compile_container(
             prepared.injectables,
             prepared.ordered,
@@ -283,24 +292,22 @@ class Kernel:
 
 @dataclass(frozen=True, slots=True)
 class Assembly:
-    """What steps 3 to 10 produce: a frozen build state, ready to compile.
+    """What steps 3 to 5 produce: a frozen build state, ready to compile.
 
     Attributes:
         state: The definitions, parameters and requests of the build.
         decorations: Validated decorations per decorated key.
-        parameter_providers: The application's ``@parameters`` functions.
         on_boot: ``@on_boot`` hooks, in the order they run.
         on_shutdown: ``@on_shutdown`` hooks, in the order they run.
     """
 
     state: BuildState
     decorations: dict[ServiceKey, list[Decoration]]
-    parameter_providers: list[ScannedObject]
     on_boot: list[Callable[..., object]]
     on_shutdown: list[Callable[..., object]]
 
 
-def assemble(  # noqa: PLR0913 — steps 3 to 10 need all of these.
+def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     *,
     name: str,
     bundles: Sequence[AnyBundle],
@@ -313,15 +320,20 @@ def assemble(  # noqa: PLR0913 — steps 3 to 10 need all of these.
     exclude: Sequence[str],
     report: ReportBuilder,
     given: Sequence[object] = (),
+    environ: Mapping[str, str] | None = None,
 ) -> Assembly:
-    """Run steps 3 to 10 for ``bundles``, recording into ``report``.
+    """Run steps 3 to 5 for ``bundles``, recording into ``report``.
 
     Shared by :func:`prepare`, which computes ``active`` once for both the
     report and this call.
     """
     scanner = Scanner(env=environment, exclude=exclude)
     early = _early_scan(scanner, resources, bundles)
-    state = BuildState(env=environment, debug=debug, bundles=tuple(active), configs={})
+    state = BuildState(
+        env=environment, debug=debug, bundles=tuple(active), configs={}, environ=environ
+    )
+    state.candidates.extend(early.services)
+    state.scanned_decorators.extend(early.decorators)
     _register_kernel_parameters(
         state,
         name=name,
@@ -330,35 +342,27 @@ def assemble(  # noqa: PLR0913 — steps 3 to 10 need all of these.
         project_dir=project_dir,
         bundles=bundles,
     )
-    _build(state, bundles)
-    _run_prepend_extension(state, bundles)
-    configs = _configs(
-        bundles,
-        early,
-        inactive_config_owners,
-        environment,
+    # Every parameter is known before the merge, which resolves configs against them.
+    for scanned in early.parameters:
+        values = call_parameters(cast("Callable[..., object]", scanned.obj))
+        state.add_parameters(Origin("app", scanned.name), values)
+    _prepare_container(state, bundles, early.compiler_passes)
+    merge = MergeExtensionConfigurationPass(
+        bundles=bundles,
+        early=early,
+        scanner=scanner,
+        inactive=inactive_config_owners,
+        report=report,
         given=given,
-        prepends=state.prepends,
     )
-    report.configs.extend(configs.reports)
-    report.skipped.extend(configs.skipped)
-    state.configs = configs.values
-    _load(state, bundles, configs)
-    late = _late_scan(scanner, state)
-    _marked(state, [*early.marked, *late.marked])
-    _autoconfigure(state, [*early.services, *late.services])
-    _run_compiler_passes(
-        state,
-        bundles,
-        [*early.compiler_passes, *late.compiler_passes],
-        [*early.decorators, *late.decorators],
-    )
+    state.compiler.get_pass_config().set_merge_pass(merge)
+    state.compiler.compile(state)
+    late = merge.late
     report.modules.extend(scanner.modules)
     report.skipped.extend(scanner.skipped)
     return Assembly(
         state=state,
         decorations=state.decorations,
-        parameter_providers=list(early.parameters),
         on_boot=_hooks([*early.on_boot, *late.on_boot], on_boot_of),
         on_shutdown=_hooks([*early.on_shutdown, *late.on_shutdown], on_shutdown_of),
     )
@@ -373,7 +377,7 @@ class Prepared:
         report: The report so far — bundles, configs, modules; definitions are
             added by :meth:`finish_report`.
         bundles: The active bundle instances, in dependency order.
-        assembly: What steps 3 to 10 produced.
+        assembly: What steps 3 to 5 produced.
         ordered: The definitions in emission order.
         injectables: The wireup injectables realizing them.
     """
@@ -405,8 +409,9 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     resources: Sequence[str | ModuleType],
     exclude: Sequence[str],
     given: Sequence[object] = (),
+    environ: Mapping[str, str] | None = None,
 ) -> Prepared:
-    """Run steps 1's aftermath through 10, then emit: the pipeline both entry points share.
+    """Run steps 1's aftermath through 5, then emit: the pipeline both entry points share.
 
     Chooses the bundles, records them, assembles the definitions, orders them
     and emits the wireup injectables — everything up to but not including the
@@ -433,6 +438,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
         exclude=exclude,
         report=report,
         given=given,
+        environ=environ,
     )
     ordered = emission_order(assembly.state.store.entries())
     injectables = emit_injectables(ordered, assembly.decorations, core.resetter.track)
@@ -470,42 +476,34 @@ def _early_scan(
     return merged
 
 
-def _configs(  # noqa: PLR0913 — every input feeds resolve_configs directly.
-    bundles: Sequence[AnyBundle],
-    early: ScanResult,
-    inactive: Mapping[type, str],
-    environment: str,
-    *,
-    given: Sequence[object] = (),
-    prepends: Sequence[object] = (),
-) -> ResolvedConfigs:
-    """Step 5: every bundle's resolved config, given the prepends already recorded."""
-    from xtr_dependency_injection.builder.service_configurator import Prepend  # noqa: PLC0415
+def _prepare_container(
+    state: BuildState, bundles: Sequence[AnyBundle], scanned_passes: Sequence[ScannedObject]
+) -> None:
+    """Step 4: register the compiler passes, running every bundle's ``build`` in between.
 
-    return resolve_configs(
-        bundles=bundles,
-        providers=early.configure,
-        inactive=inactive,
-        env=environment,
-        given=given,
-        prepends=cast("Sequence[Prepend]", prepends),
-    )
-
-
-def _build(state: BuildState, bundles: Sequence[AnyBundle]) -> None:
-    """Step 4: every bundle's ``build(builder)``, in order."""
+    First every bundle overriding ``process`` is registered as a pass at
+    ``BEFORE_OPTIMIZATION`` :data:`BUNDLE_PASS_PRIORITY`, in bundle order; then
+    every bundle's ``build(builder)`` runs, which may add passes of its own;
+    then every scanned ``@compiler_pass`` class is built with no arguments and
+    registered, in scan order.
+    """
     state.phase = "build"
+    compiler = state.compiler
     for bundle in bundles:
-        origin = _origin_of(type(bundle).metadata().name)
-        bundle.build(ContainerBuilder(state, origin))
-
-
-def _run_prepend_extension(state: BuildState, bundles: Sequence[AnyBundle]) -> None:
-    """Step 5a: every bundle's ``prepend_extension(builder)``, in order."""
-    state.phase = "prepend"
+        if _overrides(bundle, "process"):
+            origin = origin_of(type(bundle).metadata().name)
+            compiler.add_pass(
+                bundle, PassStage.BEFORE_OPTIMIZATION, BUNDLE_PASS_PRIORITY, origin=origin
+            )
     for bundle in bundles:
-        origin = _origin_of(type(bundle).metadata().name)
-        bundle.prepend_extension(ContainerBuilder(state, origin))
+        bundle.build(ContainerBuilder(state, origin_of(type(bundle).metadata().name)))
+    for scanned in scanned_passes:
+        marker = compiler_pass_of(scanned.obj)
+        if marker is None:  # pragma: no cover — the scanner queues only marked classes.
+            continue
+        pass_class = cast("type[CompilerPassInterface]", scanned.obj)
+        origin = scanned_origin(scanned, "compiler pass")
+        compiler.add_pass(pass_class(), marker.stage, marker.priority, origin=origin)
 
 
 def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a fixed 5-field shape.
@@ -524,19 +522,17 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
     beginning of the container build; every bundle's hook may read them.
     """
     bundles_map = {type(bundle).metadata().name: qualified_name(type(bundle)) for bundle in bundles}
-    state.parameters.append(
-        (
-            Origin("kernel", KERNEL_BUNDLE),
-            {
-                KERNEL_BUNDLE: {
-                    "name": name,
-                    "environment": environment,
-                    "debug": debug,
-                    "project_dir": str(project_dir),
-                    "bundles": bundles_map,
-                }
-            },
-        )
+    state.add_parameters(
+        Origin("kernel", KERNEL_BUNDLE),
+        {
+            KERNEL_BUNDLE: {
+                "name": name,
+                "environment": environment,
+                "debug": debug,
+                "project_dir": str(project_dir),
+                "bundles": bundles_map,
+            }
+        },
     )
 
 
@@ -554,239 +550,6 @@ def _inactive_config_owners(
             continue
         result[metadata.config] = metadata.name
     return result
-
-
-def _load(state: BuildState, bundles: Sequence[AnyBundle], configs: ResolvedConfigs) -> None:
-    """Step 6: every bundle's ``load_extension``, in order.
-
-    Right after the kernel bundle loads (its info and resetter), the kernel
-    registers every active bundle's resolved non-``NoConfig`` config under its
-    type, so any service can inject it — preserving the emission order of
-    info, resetter, then configs.
-    """
-    state.phase = "load"
-    for bundle in bundles:
-        name = type(bundle).metadata().name
-        origin = _origin_of(name)
-        services = ServiceConfigurator(state, origin)
-        builder = ContainerBuilder(state, origin)
-        bundle.load_extension(configs.values[name], services, builder)
-        if name == KERNEL_BUNDLE:
-            _register_configs(state, configs.values)
-
-
-def _register_configs(state: BuildState, values: Mapping[str, object]) -> None:
-    """Register every resolved non-``NoConfig`` config under its type, as the kernel."""
-    services = ServiceConfigurator(state, _origin_of(KERNEL_BUNDLE))
-    for value in values.values():
-        if not isinstance(value, NoConfig):
-            _ = services.instance(value)
-
-
-def _late_scan(scanner: Scanner, state: BuildState) -> ScanResult:
-    """Step 6: what bundles asked to scan while loading."""
-    merged = ScanResult()
-    for owner, resources in state.late_scans:
-        merged.extend(scanner.scan(resources, owner=owner, late=True))
-    return merged
-
-
-def _marked(state: BuildState, marked: Sequence[ScannedObject]) -> None:
-    """Step 7b: definitions for objects carrying ``@as_service`` or ``@as_alias``.
-
-    Each object becomes exactly one definition under its own type + qualifier;
-    every ``@as_alias(Iface)`` records an alias
-    ``(Iface, ...) -> (own_type, own_qualifier)`` in the build state.
-    """
-    for scanned in marked:
-        obj = scanned.obj
-        service = service_of(obj)
-        aliases = aliases_of(obj)
-        origin = (
-            Origin("app", scanned.name)
-            if scanned.owner is None
-            else Origin("bundle", scanned.owner, f"marked by {scanned.name}")
-        )
-        if inspect.isclass(obj):
-            own_type = obj
-            kind: Literal["class", "factory"] = "class"
-        elif inspect.isfunction(obj):
-            own_type = key_type(cast("Callable[..., object]", obj), None)
-            kind = "factory"
-        else:  # pragma: no cover — the scanner queues only classes and functions.
-            continue
-        lifetime = service.lifetime if service is not None else "singleton"
-        qualifier = service.qualifier if service is not None else None
-        own_key: ServiceKey = (own_type, qualifier)
-        existing = state.store.get(own_key)
-        if existing is None or existing.provider is not obj:
-            tagged = tagged_item_of(obj)
-            definition = Definition(own_key, obj, kind, lifetime, origin)
-            if tagged is not None:
-                definition.priority = tagged.priority
-                definition.before = tagged.before
-                definition.after = tagged.after
-            state.store.add(definition)
-        for marker in aliases:
-            record_alias(
-                state.aliases,
-                state.alias_origins,
-                (marker.alias, marker.qualifier),
-                own_key,
-                origin,
-            )
-        for attributes in remove_if_missing_markers_of(obj):
-            definition = state.store.get(own_key)
-            if definition is not None:
-                _ = definition.add_tag(REMOVE_IF_MISSING_TAG, **attributes)
-
-
-def _autoconfigure(state: BuildState, candidates: Sequence[ScannedObject]) -> None:
-    """Step 9: attribute autoconfigurators + nominal ``register_for_autoconfiguration`` rules.
-
-    Attribute-based autoconfigurators run first over every service candidate
-    (see :meth:`ContainerBuilder.register_attribute_for_autoconfiguration`);
-    then the nominal rules registered by
-    :meth:`ContainerBuilder.register_for_autoconfiguration` (subclass match)
-    plus any ``@autoconfigure`` / ``@autoconfigure_tag`` markers on scanned
-    classes apply to every non-kernel definition.
-    """
-    state.phase = "autoconfigure"
-
-    def configurator_for(owner: str, candidate: ScannedObject) -> ServiceConfigurator:
-        base = _origin_of(owner)
-        origin = Origin(base.kind, base.name, f"via autoconfigure of {candidate.name}")
-        return ServiceConfigurator(state, origin)
-
-    run_autoconfigurators(state.autoconfigurators, candidates, configurator_for)
-    apply_autoconfigure_rules(state, candidates)
-
-
-def _run_compiler_passes(
-    state: BuildState,
-    bundles: Sequence[AnyBundle],
-    scanned_passes: Sequence[ScannedObject],
-    scanned_decorators: Sequence[ScannedObject],
-) -> None:
-    """Run every compiler pass, stage by stage.
-
-    Collection order — bundle-as-compiler-pass, then application, then
-    built-ins: for each active bundle in order — its ``process`` if the
-    class overrides ``Bundle.process``, then whatever it added in ``build``
-    via ``builder.add_compiler_pass``; then the application's scanned
-    ``@compiler_pass`` functions in scan order; then the built-in kernel
-    passes. Execution follows :class:`PassStage` — one stage at a time —
-    and within a stage by priority descending, ties by collection order.
-    """
-    state.phase = "process"
-    requests = collect_compiler_passes(state, bundles, scanned_passes, scanned_decorators)
-    for request in _sorted_passes(requests):
-        _ = request.fn(ContainerBuilder(state, request.origin))
-
-
-def collect_compiler_passes(
-    state: BuildState,
-    bundles: Sequence[AnyBundle],
-    scanned_passes: Sequence[ScannedObject],
-    scanned_decorators: Sequence[ScannedObject],
-) -> list[CompilerPassRequest]:
-    """Return every compiler pass to run, in collection order.
-
-    Collection order: bundles' own ``process`` (only when overridden),
-    then the passes each bundle added via ``builder.add_compiler_pass``,
-    then application ``@compiler_pass`` functions in scan order, then the
-    built-in kernel passes.
-    """
-    collected: list[CompilerPassRequest] = []
-
-    def append(
-        fn: Callable[[ContainerBuilder], object],
-        *,
-        stage: PassStage,
-        priority: int,
-        origin: Origin,
-        description: str,
-    ) -> None:
-        collected.append(
-            CompilerPassRequest(
-                fn=cast("Callable[[object], object]", fn),
-                stage=stage,
-                priority=priority,
-                order=len(collected),
-                origin=origin,
-                description=description,
-            )
-        )
-
-    for bundle in bundles:
-        name = type(bundle).metadata().name
-        if _overrides(bundle, "process"):
-            append(
-                bundle.process,
-                stage=PassStage.BEFORE_OPTIMIZATION,
-                priority=0,
-                origin=_origin_of(name),
-                description=f"{qualified_name(type(bundle))}.process",
-            )
-        origin_name = name
-        for request in state.compiler_passes:
-            if request.origin.name == origin_name and request.origin.kind != "app":
-                collected.append(
-                    CompilerPassRequest(
-                        fn=request.fn,
-                        stage=request.stage,
-                        priority=request.priority,
-                        order=len(collected),
-                        origin=request.origin,
-                        description=request.description,
-                    )
-                )
-    for scanned in scanned_passes:
-        marker = compiler_pass_of(scanned.obj)
-        if marker is None:
-            continue
-        append(
-            cast("Callable[[ContainerBuilder], object]", scanned.obj),
-            stage=marker.stage,
-            priority=marker.priority,
-            origin=_scanned_origin(scanned),
-            description=scanned.name,
-        )
-    kernel_origin = _origin_of(KERNEL_BUNDLE)
-    append(
-        lambda builder: resolve_decorations_pass(builder, scanned_decorators),
-        stage=PassStage.OPTIMIZE,
-        priority=0,
-        origin=kernel_origin,
-        description="kernel:resolve_decorations",
-    )
-    append(
-        remove_if_missing_pass,
-        stage=PassStage.BEFORE_REMOVING,
-        priority=0,
-        origin=kernel_origin,
-        description="kernel:remove_if_missing",
-    )
-    append(
-        validate_aliases_pass,
-        stage=PassStage.AFTER_REMOVING,
-        priority=0,
-        origin=kernel_origin,
-        description="kernel:validate_aliases",
-    )
-    return collected
-
-
-def _sorted_passes(requests: Sequence[CompilerPassRequest]) -> list[CompilerPassRequest]:
-    """Sort ``requests`` by stage, then priority descending, ties by collection order.
-
-    Priority and collection order are handled by the shared :func:`by_priority`
-    helper; the stage stays the primary key on top, applied as a stable sort
-    over the priority-ordered result so within-stage order is preserved.
-    """
-    ranked = by_priority(requests, priority=lambda r: r.priority, order=lambda r: r.order)
-    stage_order = {stage: index for index, stage in enumerate(PassStage)}
-    return sorted(ranked, key=lambda r: stage_order[r.stage])
 
 
 def definition_reports(
@@ -811,6 +574,7 @@ def definition_reports(
             decorated_by=tuple(d.name for d in decorations.get(definition.key, ())),
             tags=tuple(definition.tags),
             aliases=tuple(aliases_of_target.get(definition.key, ())),
+            arguments=tuple(f"{name}={value!r}" for name, value in definition.arguments.items()),
         )
         for definition in ordered
     ]

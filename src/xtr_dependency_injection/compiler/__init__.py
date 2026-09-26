@@ -1,7 +1,8 @@
-"""Compiling definitions into wireup injectables.
+"""Compiling the container: the compiler passes, their configuration, and wireup emission.
 
-Private: nothing here is part of the public API. The box types decoration
-creates report this package as their module.
+``CompilerPassInterface`` and ``PassStage`` are public through the package
+root; everything else here is private. The box types decoration creates
+report this package as their module.
 """
 
 from __future__ import annotations

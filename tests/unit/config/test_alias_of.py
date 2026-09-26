@@ -101,7 +101,6 @@ def _resolve(
         bundles=bundles,
         providers=_scanned(*functions),
         inactive={},
-        env="dev",
     )
 
 
@@ -179,11 +178,51 @@ def test_an_inactive_target_is_reported_as_skipped_not_an_error() -> None:
     assert ("alias_of alpha.mail", "target bundle is not active") in resolved.skipped
 
 
+def test_an_owner_after_its_target_in_bundle_order_still_forwards() -> None:
+    @configure
+    def alpha() -> AlphaConfig:
+        return AlphaConfig(mail=MailConfig(host="smtp.example"))
+
+    resolved = _resolve(alpha, bundles=(CoreBundle(), MailBundle(), AlphaBundle()))
+
+    assert resolved.values["mail"] == MailConfig(host="smtp.example")
+    assert [report.bundle for report in resolved.reports] == ["kernel", "mail", "alpha"]
+
+
+@dataclass(frozen=True)
+class BetaConfig:
+    mail: Annotated[MailConfig | None, AliasOf("mail")] = None
+
+
+@as_bundle("beta", config=BetaConfig)
+class BetaBundle(Bundle[BetaConfig]):
+    pass
+
+
+def test_two_bundles_forwarding_to_one_target_conflict() -> None:
+    @configure
+    def alpha() -> AlphaConfig:
+        return AlphaConfig(mail=MailConfig(host="a"))
+
+    @configure
+    def beta() -> BetaConfig:
+        return BetaConfig(mail=MailConfig(host="b"))
+
+    with pytest.raises(ConflictingConfigProvidersError) as caught:
+        _ = _resolve(alpha, beta, bundles=(CoreBundle(), AlphaBundle(), BetaBundle(), MailBundle()))
+
+    assert caught.value.config_type is MailConfig
+
+
 def test_an_alias_loop_between_two_bundles_is_a_cycle() -> None:
-    with pytest.raises(CircularBundleDependencyError):
+    with pytest.raises(CircularBundleDependencyError) as caught:
         _ = _resolve(bundles=(CoreBundle(), LoopABundle(), LoopBBundle()))
+
+    assert caught.value.cycle == ("loop_a", "loop_b", "loop_a")
 
 
 def test_a_bundle_aliasing_to_itself_is_a_cycle() -> None:
-    with pytest.raises(CircularBundleDependencyError):
+    with pytest.raises(CircularBundleDependencyError) as caught:
         _ = _resolve(bundles=(CoreBundle(), SelfBundle()))
+
+    assert caught.value.cycle == ("selfy", "selfy")
