@@ -156,8 +156,10 @@ independent.
 An application lists root bundles in `<package>/bundles.py`. Each maps a class to per-env
 activity flags: `{"all": True}` for every environment, `{"dev": True, "test": True}` when you
 want that bundle only in development. **Installing a package does not activate a bundle**:
-there is no entry-point discovery. If a bundle should be active, list it — or make another
-active bundle require it.
+nothing is discovered. If a bundle should be active, list it — or make another active bundle
+require it. `debug:bundles` names the installed bundles that are neither (see
+[Advertising a bundle](#advertising-a-bundle)), and each xtr package's README says, under
+*Use in an application*, exactly what adding it to an application takes.
 
 ```python
 # app/bundles.py
@@ -273,6 +275,23 @@ from xtr_dependency_injection.testing import assert_zero_config
 async def test_mail_bundle_works_unconfigured() -> None:
     await assert_zero_config(MailBundle)
 ```
+
+### Advertising a bundle
+
+A library advertises its bundle under the `xtr_dependency_injection.bundles` entry point
+group, named after the bundle:
+
+```toml
+[project.entry-points."xtr_dependency_injection.bundles"]
+mail = "acme_mail.bundle:MailBundle"
+```
+
+Advertising activates nothing. It answers the one question the kernel's report cannot:
+*which installed bundles did the application leave out?* `debug:bundles` lists them under
+**Installed, not active**, so a package added and never listed shows up instead of silently
+contributing no services. `installed_bundles()`, from `xtr_dependency_injection.bundle`,
+returns them — importing each, so call it from a diagnostic, never from a build. A target that
+cannot be imported, or is not an `@as_bundle` class, is skipped.
 
 ## Configuration
 
@@ -963,8 +982,8 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 - **`boot` and `shutdown` are async.**
 - **No lazy proxies, no synthetic services, no abstract or parent definitions, no
   public/private pruning.**
-- **Installing a package does not activate a bundle**: there is no entry-point discovery, so
-  the application lists root bundles.
+- **Installing a package does not activate a bundle**: an advertised bundle is only reported,
+  so the application lists root bundles.
 
 ## Errors
 
@@ -1010,7 +1029,8 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 - **asyncio only** for `kernel.run`.
 - **Annotations must be importable at runtime** wherever wireup or the kernel reads them —
   not under `TYPE_CHECKING`.
-- **No entry-point bundle discovery** and no `bundles:sync` command.
+- **No bundle activation by discovery** and no command that edits `bundles.py`: advertised
+  bundles are reported by `debug:bundles`, never activated.
 - **Environment placeholders are process-wide.** A placeholder stands for its expression, not
   for a kernel: every kernel reads it through its own processors, and the process keeps one
   placeholder per distinct `env()` expression.
