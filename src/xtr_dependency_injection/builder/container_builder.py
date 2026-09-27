@@ -73,15 +73,17 @@ class ContainerBuilder:
         /,
         *,
         qualifier: Hashable | None = None,
-        lifetime: Lifetime = "singleton",
+        lifetime: Lifetime | None = None,
     ) -> Definition:
         """Register ``service`` as a class definition and return it, for further mutation.
 
-        Allowed in phases ``load`` and ``process``.
+        ``lifetime`` is ``"singleton"`` when not given, and then left for
+        autoconfiguration to set. Allowed in phases ``load`` and ``process``.
         """
         self._allow("register", "load", "process")
         key: ServiceKey = (service, qualifier)
-        definition = Definition(key, service, "class", lifetime, self._origin)
+        definition = Definition(key, service, "class", lifetime or "singleton", self._origin)
+        definition.lifetime_explicit = lifetime is not None
         self._state.store.add(definition)
         return definition
 

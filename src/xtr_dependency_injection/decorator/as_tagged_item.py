@@ -84,7 +84,7 @@ def as_tagged_item(
         # already marked the object as a service, register it with a
         # singleton lifetime under ``index`` as its qualifier.
         if own_marker(obj, _SERVICE) is None:
-            obj = set_marker(obj, _SERVICE, ServiceMarker(lifetime="singleton", qualifier=index))
+            obj = set_marker(obj, _SERVICE, ServiceMarker(qualifier=index))
         return obj
 
     return mark(target) if target is not None else mark

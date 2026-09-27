@@ -174,9 +174,12 @@ class ServiceConfigurator:
         /,
         *,
         qualifier: Hashable | None = None,
-        lifetime: Lifetime = "singleton",
+        lifetime: Lifetime | None = None,
     ) -> Definition:
         """Register ``target`` — a class or a factory function — as a service.
+
+        ``lifetime`` is ``"singleton"`` when not given, and then left for
+        autoconfiguration to set.
 
         A class is registered under its own type; a function under its
         evaluated return type. Same key + same provider is a no-op.
@@ -197,7 +200,8 @@ class ServiceConfigurator:
         existing = self._state.store.get(key)
         if existing is not None and existing.provider is target:
             return existing
-        definition = Definition(key, target, kind, lifetime, self._origin)
+        definition = Definition(key, target, kind, lifetime or "singleton", self._origin)
+        definition.lifetime_explicit = lifetime is not None
         self._state.store.add(definition)
         return definition
 

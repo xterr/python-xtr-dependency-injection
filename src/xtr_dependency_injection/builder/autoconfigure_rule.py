@@ -4,7 +4,8 @@
 whose built type has the rule's ``type_`` in its ``__mro__`` (a nominal subclass
 check, not a structural check). Kernel-origin definitions are never
 autoconfigured. A tag name already present on a definition wins over the
-rule's — explicit stays.
+rule's, and so does a lifetime the service was given explicitly — explicit
+stays.
 """
 
 from __future__ import annotations

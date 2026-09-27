@@ -83,6 +83,9 @@ class Definition:
             instead of injecting them. A value may hold an ``env()``
             placeholder or a ``%name%`` reference: it is resolved when the
             service is built.
+        lifetime_explicit: Whether ``lifetime`` was asked for rather than
+            left to its default — an autoconfiguration rule never overrides
+            one that was.
     """
 
     key: ServiceKey
@@ -96,6 +99,7 @@ class Definition:
     before: tuple[type, ...] = ()
     after: tuple[type, ...] = ()
     arguments: dict[str, object] = field(default_factory=dict)
+    lifetime_explicit: bool = False
 
     def set_argument(self, name: str, value: object, /) -> Definition:
         """Give the provider's parameter ``name`` the value ``value`` instead of injecting it.

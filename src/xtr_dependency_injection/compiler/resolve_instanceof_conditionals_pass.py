@@ -34,7 +34,8 @@ class ResolveInstanceofConditionalsPass:
     """Applies every matching autoconfiguration rule to each definition.
 
     Kernel-origin definitions are never autoconfigured, and a tag already on a
-    definition wins over the rule's — explicit stays.
+    definition wins over the rule's, as does a lifetime the service was given
+    explicitly — explicit stays.
     """
 
     __slots__ = ()
@@ -71,7 +72,7 @@ def _apply(rule: AutoconfigureRule, definition: Definition, built: type) -> None
                 _ = definition.add_tag(tag_name, **dict(computed))
             else:
                 _ = definition.add_tag(tag_name, **attrs)
-    if rule.lifetime is not None:
+    if rule.lifetime is not None and not definition.lifetime_explicit:
         definition.lifetime = rule.lifetime
     if rule.factory is not None and definition.kind == "class":
         _replace_with_factory(definition, rule.factory, built)

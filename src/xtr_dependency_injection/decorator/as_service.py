@@ -28,9 +28,13 @@ _SERVICE: Final = "__xtr_service__"
 
 @dataclass(frozen=True, slots=True)
 class ServiceMarker:
-    """What ``@as_service`` records: the lifetime and qualifier of the service."""
+    """What ``@as_service`` records: the lifetime and qualifier of the service.
 
-    lifetime: Lifetime = "singleton"
+    ``lifetime`` is ``None`` when not given: ``"singleton"``, unless
+    autoconfiguration sets another.
+    """
+
+    lifetime: Lifetime | None = None
     qualifier: Hashable | None = None
 
 
@@ -38,13 +42,13 @@ class ServiceMarker:
 def as_service(target: T, /) -> T: ...
 @overload
 def as_service(
-    *, lifetime: Lifetime = "singleton", qualifier: Hashable | None = None
+    *, lifetime: Lifetime | None = None, qualifier: Hashable | None = None
 ) -> Callable[[T], T]: ...
 def as_service(
     target: T | None = None,
     /,
     *,
-    lifetime: Lifetime = "singleton",
+    lifetime: Lifetime | None = None,
     qualifier: Hashable | None = None,
 ) -> T | Callable[[T], T]:
     """Register the decorated class or factory as a service.
@@ -53,8 +57,9 @@ def as_service(
 
     Args:
         target: The class or factory to mark as a service (when used bare).
-        lifetime: How long the container keeps what it builds; defaults to
-            ``"singleton"``.
+        lifetime: How long the container keeps what it builds;
+            ``"singleton"`` when not given, unless autoconfiguration sets
+            another. Given, it is never overridden.
         qualifier: An optional qualifier — a second value in the service
             key ``(type, qualifier)``.
     """

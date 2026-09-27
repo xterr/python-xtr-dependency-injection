@@ -174,12 +174,13 @@ def _register_marked(state: BuildState, marked: Sequence[ScannedObject]) -> None
         else:  # pragma: no cover — the scanner queues only classes and functions.
             continue
         service = service_of(obj)
-        lifetime = service.lifetime if service is not None else "singleton"
+        lifetime = service.lifetime if service is not None else None
         own_key: ServiceKey = (own_type, service.qualifier if service is not None else None)
         origin = scanned_origin(scanned, "marked by")
         existing = state.store.get(own_key)
         if existing is None or existing.provider is not obj:
-            definition = Definition(own_key, obj, kind, lifetime, origin)
+            definition = Definition(own_key, obj, kind, lifetime or "singleton", origin)
+            definition.lifetime_explicit = lifetime is not None
             tagged = tagged_item_of(obj)
             if tagged is not None:
                 definition.priority = tagged.priority

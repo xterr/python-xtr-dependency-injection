@@ -18,7 +18,7 @@ def test_as_service_records_its_defaults_on_a_class() -> None:
 
     marker = service_of(Marked)
 
-    assert marker == ServiceMarker(lifetime="singleton", qualifier=None)
+    assert marker == ServiceMarker(lifetime=None, qualifier=None)
 
 
 def test_as_service_records_a_custom_lifetime_and_qualifier() -> None:
@@ -59,7 +59,7 @@ def test_as_service_bare_form_on_a_class() -> None:
 
     marker = service_of(Marked)
 
-    assert marker == ServiceMarker(lifetime="singleton", qualifier=None)
+    assert marker == ServiceMarker(lifetime=None, qualifier=None)
 
 
 def test_as_service_bare_form_on_a_factory_function() -> None:
@@ -69,4 +69,4 @@ def test_as_service_bare_form_on_a_factory_function() -> None:
 
     marker = service_of(build)
 
-    assert marker == ServiceMarker(lifetime="singleton", qualifier=None)
+    assert marker == ServiceMarker(lifetime=None, qualifier=None)
