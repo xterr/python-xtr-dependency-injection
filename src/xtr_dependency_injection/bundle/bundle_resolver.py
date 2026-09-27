@@ -136,6 +136,11 @@ def _register_class(
         )
     metadata = bundle_type.metadata()
     name = metadata.name
+    if source == "listed" and name == KERNEL_BUNDLE:
+        # Listing it would build a second, unwired instance in place of the kernel's own.
+        raise BundleDefinitionError(
+            qualified_name(bundle_type), "the kernel bundle is always active: do not list it"
+        )
     existing = candidates.get(name)
     if existing is not None:
         if existing.bundle_type is not bundle_type:

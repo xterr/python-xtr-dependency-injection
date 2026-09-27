@@ -203,6 +203,11 @@ def test_two_listed_bundles_with_the_same_name_are_refused() -> None:
         _ = _resolve({ClashA: {"all": True}, ClashB: {"all": True}})
 
 
+def test_listing_the_kernel_bundle_is_refused() -> None:
+    with pytest.raises(BundleDefinitionError, match="always active"):
+        _ = _resolve({CoreBundle: {"all": True}})
+
+
 def test_only_active_bundle_classes_are_instantiated() -> None:
     # RaisesOnInit raises in its constructor; when disabled it must not be built.
     resolved = resolve_bundles(
