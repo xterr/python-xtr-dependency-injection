@@ -22,6 +22,7 @@ from xtr_dependency_injection.scan.scanned_object import ScannedObject
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from decimal import Decimal  # noqa: TC004 — the mistake under test: unresolvable at runtime.
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
 
@@ -226,3 +227,19 @@ def test_a_bundle_aliasing_to_itself_is_a_cycle() -> None:
         _ = _resolve(bundles=(CoreBundle(), SelfBundle()))
 
     assert caught.value.cycle == ("selfy", "selfy")
+
+
+@dataclass(frozen=True)
+class ForwardsATypeImportedForTypeCheckingOnly:
+    forwarded: Annotated[Decimal | None, AliasOf("mail")] = None
+
+
+def test_an_alias_of_field_whose_type_cannot_be_resolved_is_an_error_not_a_dropped_forward() -> (
+    None
+):
+    with pytest.raises(NameError) as caught:
+        _ = alias_of_fields(ForwardsATypeImportedForTypeCheckingOnly)
+
+    assert any(
+        "ForwardsATypeImportedForTypeCheckingOnly" in note for note in caught.value.__notes__
+    )

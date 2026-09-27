@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated, cast, get_args, get_origin, get_type_hints
 
+from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+
 __all__ = ["AliasOf", "alias_of_fields"]
 
 
@@ -30,13 +32,19 @@ def alias_of_fields(config_type: type) -> list[tuple[str, str]]:
     """Return ``(field_name, target_bundle)`` for every ``AliasOf``-annotated field.
 
     Fields typed anything but ``Annotated[..., AliasOf(...)]`` are ignored.
-    Only the first ``AliasOf`` on a field counts. Types whose annotations
-    cannot be resolved at runtime yield an empty list — the config resolver
-    will fail later with a clearer message if needed.
+    Only the first ``AliasOf`` on a field counts.
+
+    Raises:
+        NameError: If an annotation names something not importable at
+            runtime — imported for type checking alone, say — since a
+            forward it hid would otherwise be dropped without a word.
     """
     try:
         raw_hints = get_type_hints(config_type, include_extras=True)
-    except Exception:  # noqa: BLE001 — an unresolvable annotation is not this helper's failure.
+    except NameError as error:
+        error.add_note(f"while reading the config {qualified_name(config_type)}: {ANNOTATION_HINT}")
+        raise
+    except Exception:  # noqa: BLE001 — a hint the typing module cannot read has no AliasOf to find.
         return []
     hints = cast("dict[str, object]", raw_hints)
     found: list[tuple[str, str]] = []
