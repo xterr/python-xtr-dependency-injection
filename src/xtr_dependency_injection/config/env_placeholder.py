@@ -200,8 +200,12 @@ def placeholder(
     prefix a ``str``; anything else, or a ``cast`` no prefix stands for, an
     opaque placeholder.
     """
+    # A qualified name does not identify a callable (every lambda of a module
+    # shares one), so the cast's identity is part of the spec. The registry
+    # keeps the cast alive, so its id is never reused while the entry exists.
+    cast_identity = "" if cast is None else f"{qualified_name(cast)}#{id(cast)}"
     digest = hashlib.blake2b(
-        f"{expression}|{qualified_name(cast)}|{default!r}".encode(), key=_SALT, digest_size=16
+        f"{expression}|{cast_identity}|{default!r}".encode(), key=_SALT, digest_size=16
     ).hexdigest()
     token = f"env_{re.sub(r'[^A-Za-z0-9_]', '_', expression)}_{digest}"
     existing = _REGISTRY.get(token)

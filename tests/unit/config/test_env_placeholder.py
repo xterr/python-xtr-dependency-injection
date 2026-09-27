@@ -31,6 +31,10 @@ def _get_env(expression: str) -> object:
     return VALUES[expression]
 
 
+def _double(value: object) -> int:
+    return int(str(value)) * 2
+
+
 @dataclass(frozen=True)
 class Transport:
     dsn: str
@@ -57,6 +61,27 @@ class Pair(NamedTuple):
 def test_one_spec_makes_one_placeholder() -> None:
     assert env("HOST") is env("HOST")
     assert env("HOST") is not env("HOST", default="x")
+
+
+def test_two_casts_sharing_a_qualified_name_make_two_placeholders() -> None:
+    first = env("CAST_COLLISION", lambda value: f"first:{value}")
+    second = env("CAST_COLLISION", lambda value: f"second:{value}")
+
+    assert first is not second
+    assert resolve_env_placeholders(second, lambda _: "x") == "second:x"
+
+
+def test_one_cast_callable_makes_one_placeholder() -> None:
+    def upper(value: object) -> str:
+        return str(value).upper()
+
+    assert env("CAST_SAME", upper) is env("CAST_SAME", upper)
+
+
+def test_a_placeholder_with_a_cast_survives_pickling_as_itself() -> None:
+    port = env("PORT", _double)
+
+    assert pickle.loads(pickle.dumps(port)) is port  # noqa: S301 — our own object.
 
 
 def test_a_placeholder_is_an_instance_of_its_type_where_python_allows_it() -> None:
