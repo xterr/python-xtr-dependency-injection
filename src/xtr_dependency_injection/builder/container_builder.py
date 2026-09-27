@@ -270,8 +270,19 @@ class ContainerBuilder:
         Merges into the parameter sources under this builder's origin; a
         leaf set twice by non-``app`` sources with a different value raises
         :class:`ParameterConflictError` at parameter-merge time.
+
+        Raises:
+            BuilderPhaseError: Once the ``OPTIMIZE`` stage has resolved the
+                parameters' ``%name%`` references — a parameter set later
+                would keep its own unresolved. Set it from a pass that runs
+                ``BEFORE_OPTIMIZATION``.
         """
         self._allow("set_parameter", "build", "prepend", "load", "process")
+        if self._state.parameters_resolved:
+            # A module-level import would be circular, as in _allow.
+            from xtr_dependency_injection.exception import BuilderPhaseError  # noqa: PLC0415
+
+            raise BuilderPhaseError("set_parameter", "process, after the parameters were resolved")
         parts = name.split(".")
         nested: dict[str, object] = {parts[-1]: value}
         for part in reversed(parts[:-1]):

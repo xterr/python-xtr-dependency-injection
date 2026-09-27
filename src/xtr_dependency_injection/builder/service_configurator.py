@@ -103,6 +103,9 @@ class BuildState:
             ``None`` reads the live process environment.
         decorations: Per key, the decorations to apply — populated by the
             built-in ``OPTIMIZE`` pass and read by the wireup emitter.
+        parameters_resolved: Whether ``%name%`` references in the parameters
+            have been resolved; a parameter set after that would keep its
+            references unresolved, so none may be.
     """
 
     env: str
@@ -131,6 +134,7 @@ class BuildState:
         self.parameter_bag.add(values)
 
     decorations: dict[ServiceKey, list[Decoration]] = field(default_factory=dict)
+    parameters_resolved: bool = False
 
 
 class ServiceConfigurator:

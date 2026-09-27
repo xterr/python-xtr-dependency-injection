@@ -51,3 +51,4 @@ class ResolveParameterPlaceHoldersPass:
         resolved = bag.unescape_value(bag.all())
         bag.clear()
         bag.add(cast("dict[str, object]", resolved))
+        state.parameters_resolved = True

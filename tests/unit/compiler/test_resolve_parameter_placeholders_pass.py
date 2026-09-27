@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from xtr_dependency_injection.builder import Definition, Origin
 from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.service_configurator import BuildState
@@ -7,6 +9,7 @@ from xtr_dependency_injection.compiler.resolve_parameter_placeholders_pass impor
     ResolveParameterPlaceHoldersPass,
 )
 from xtr_dependency_injection.config import env
+from xtr_dependency_injection.exception import BuilderPhaseError
 
 
 def test_every_source_and_the_bag_are_resolved_and_unescaped() -> None:
@@ -45,3 +48,17 @@ def test_definition_arguments_are_resolved_and_unescaped() -> None:
     ResolveParameterPlaceHoldersPass().process(ContainerBuilder(state, Origin("kernel", "kernel")))
 
     assert definition.get_arguments() == {"spool": "/srv/5%", "port": env("int:PORT")}
+
+
+def test_a_parameter_set_once_they_are_resolved_is_refused() -> None:
+    state = BuildState(env="dev", debug=False, bundles=("kernel",), configs={})
+    state.add_parameters(Origin("kernel", "kernel"), {"kernel": {"name": "app"}})
+    state.phase = "process"
+    builder = ContainerBuilder(state, Origin("bundle", "late"))
+    builder.set_parameter("early.value", "%kernel.name%/early")
+
+    ResolveParameterPlaceHoldersPass().process(ContainerBuilder(state, Origin("kernel", "kernel")))
+
+    assert state.parameter_bag.get("early.value") == "app/early"
+    with pytest.raises(BuilderPhaseError, match="set_parameter"):
+        builder.set_parameter("late.value", "%kernel.name%/late")
