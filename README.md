@@ -828,7 +828,9 @@ so any service explicitly inheriting `ResetInterface` (from `xtr-service-contrac
 by `ServicesResetter` between messages. A service opts in explicitly with
 `services.set(X).add_tag("kernel.reset", method="clear")` — the `method` is required, and
 `ResettableServicePass` fails the build when the service has no such method; only *built*
-services are tracked and reset.
+services are tracked and reset. Tracking holds an instance weakly, so a `scoped` or `transient`
+resettable class must accept weak references — with `__slots__`, list `"__weakref__"` — or the
+build fails.
 
 ```python
 from xtr_service_contracts import ResetInterface

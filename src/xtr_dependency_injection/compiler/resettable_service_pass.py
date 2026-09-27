@@ -36,11 +36,25 @@ class ResettableServicePass:
         """Check the ``method`` attribute of every ``kernel.reset`` tag.
 
         Raises:
-            InvalidDefinitionError: If a tag has no string ``method``, or the
-                service's built type has no such callable attribute.
+            InvalidDefinitionError: If a tag has no string ``method``, the
+                service's built type has no such callable attribute, or a
+                scoped or transient class cannot be weak-referenced.
         """
         for key, tags in builder.find_tagged_service_ids(RESET_TAG).items():
-            built = built_type(builder.get_definition(*key))
+            definition = builder.get_definition(*key)
+            built = built_type(definition)
+            if (
+                definition.kind == "class"
+                and definition.lifetime != "singleton"
+                and built is not None
+                and not _weak_referenceable(built)
+            ):
+                # The resetter would have to hold every instance built, forever.
+                reason = (
+                    f'tag "{RESET_TAG}" on a {definition.lifetime} service needs instances '
+                    'that can be weak-referenced: add "__weakref__" to its __slots__'
+                )
+                raise InvalidDefinitionError(key, reason)
             for attributes in tags:
                 method = attributes.get("method")
                 if not isinstance(method, str):
@@ -51,3 +65,8 @@ class ResettableServicePass:
                     raise InvalidDefinitionError(
                         key, f'tag "{RESET_TAG}" names method {method!r}, which it does not have'
                     )
+
+
+def _weak_referenceable(cls: type) -> bool:
+    """Return whether instances of ``cls`` accept a weak reference."""
+    return getattr(cls, "__weakrefoffset__", 1) != 0
