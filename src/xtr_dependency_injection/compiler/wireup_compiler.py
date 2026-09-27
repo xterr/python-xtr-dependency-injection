@@ -9,6 +9,7 @@ priority, highest first, then in declaration order.
 from __future__ import annotations
 
 import re
+import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from itertools import count
@@ -32,7 +33,7 @@ from .registration import (
     _resolving_instance_factory,
     _synthesize_class_factory,
 )
-from .resettable_service_pass import RESET_TAG
+from .resettable_service_pass import RESET_TAG, not_weak_referenceable
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -208,7 +209,7 @@ def _emit(
         definition.provider, instance=definition.kind == "instance", arguments=definition.arguments
     )
     if hook is not None:
-        tracked = _tracking(track, hook)
+        tracked = _tracking(track, hook, definition)
         factory = _map_result(factory, tracked, provides=implementation)
     emitted: list[object] = []
     for decoration in decorations:
@@ -286,8 +287,20 @@ def _factory_for(
     return factory, implementation
 
 
-def _tracking(track: Callable[[object, str], None], method: str) -> Callable[[object], object]:
+def _tracking(
+    track: Callable[[object, str], None], method: str, definition: Definition
+) -> Callable[[object], object]:
+    """Return what hands each instance ``definition`` builds to ``track``.
+
+    A factory may build what its return annotation does not tell, so a
+    short-lived instance refusing weak references is refused when it is
+    built — the build can only check a class.
+    """
+    short_lived = definition.lifetime != "singleton"
+
     def tracked(value: object) -> object:
+        if short_lived and not _accepts_weak_references(value):
+            raise not_weak_referenceable(definition.key, definition.lifetime)
         track(value, method)
         return value
 
@@ -347,3 +360,11 @@ def _engine_readable(token: str) -> str:
     """Turn a ``repr(cls)`` such as ``<class 'a.B'>`` into its dotted path."""
     match = _ENGINE_CLASS.fullmatch(token)
     return match.group("path") if match else token
+
+
+def _accepts_weak_references(value: object) -> bool:
+    try:
+        _ = weakref.ref(value)
+    except TypeError:
+        return False
+    return True

@@ -830,8 +830,9 @@ by `ServicesResetter` between messages. A service opts in explicitly with
 `services.set(X).add_tag("kernel.reset", method="clear")` — the `method` is required, and
 `ResettableServicePass` fails the build when the service has no such method; only *built*
 services are tracked and reset. Tracking holds an instance weakly, so a `scoped` or `transient`
-resettable class must accept weak references — with `__slots__`, list `"__weakref__"` — or the
-build fails.
+resettable service must accept weak references — with `__slots__`, list `"__weakref__"`. A class
+that does not fails the build; what a factory builds, which the build cannot see, fails with an
+`InvalidDefinitionError` when it is first built.
 
 ```python
 from xtr_service_contracts import ResetInterface

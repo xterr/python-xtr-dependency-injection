@@ -15,8 +15,9 @@ from ._wireup_bridge import built_type
 
 if TYPE_CHECKING:
     from xtr_dependency_injection.builder.container_builder import ContainerBuilder
+    from xtr_dependency_injection.builder.definition import ServiceKey
 
-__all__ = ["RESET_TAG", "ResettableServicePass"]
+__all__ = ["RESET_TAG", "ResettableServicePass", "not_weak_referenceable"]
 
 RESET_TAG: Final = "kernel.reset"
 """The tag a resettable service carries; its ``method`` attribute names the reset method."""
@@ -49,12 +50,7 @@ class ResettableServicePass:
                 and built is not None
                 and not _weak_referenceable(built)
             ):
-                # The resetter would have to hold every instance built, forever.
-                reason = (
-                    f'tag "{RESET_TAG}" on a {definition.lifetime} service needs instances '
-                    'that can be weak-referenced: add "__weakref__" to its __slots__'
-                )
-                raise InvalidDefinitionError(key, reason)
+                raise not_weak_referenceable(key, definition.lifetime)
             for attributes in tags:
                 method = attributes.get("method")
                 if not isinstance(method, str):
@@ -65,6 +61,18 @@ class ResettableServicePass:
                     raise InvalidDefinitionError(
                         key, f'tag "{RESET_TAG}" names method {method!r}, which it does not have'
                     )
+
+
+def not_weak_referenceable(key: ServiceKey, lifetime: str) -> InvalidDefinitionError:
+    """Return the error for a short-lived resettable service whose instances refuse weak references.
+
+    The resetter would have to hold every instance built, forever.
+    """
+    reason = (
+        f'tag "{RESET_TAG}" on a {lifetime} service needs instances '
+        'that can be weak-referenced: add "__weakref__" to its __slots__'
+    )
+    return InvalidDefinitionError(key, reason)
 
 
 def _weak_referenceable(cls: type) -> bool:
