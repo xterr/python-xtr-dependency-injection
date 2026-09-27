@@ -332,7 +332,9 @@ def prepend_extension(self, builder: ContainerBuilder) -> None:
 ```
 
 `builder.prepend_extension_config(target, transform)` accepts a name (string) or a config
-type. An unknown name / type is an error; an env-disabled target is skipped and reported.
+type. A target that is not active — disabled for the environment, or an installed package's
+advertised bundle the application left out — is skipped and reported; a name no bundle answers
+to is a typo, and an error, as is a type no active bundle owns.
 
 ### `AliasOf` — forwarding a config key
 

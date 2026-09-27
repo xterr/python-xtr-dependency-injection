@@ -20,9 +20,11 @@ from __future__ import annotations
 import heapq
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Final, cast
 
 from xtr_dependency_injection.bundle import NoConfig
+from xtr_dependency_injection.bundle.installed_bundles import BUNDLES_ENTRY_POINT_GROUP
 from xtr_dependency_injection.diagnostics import ConfigReport
 from xtr_dependency_injection.exception import (
     CircularBundleDependencyError,
@@ -103,7 +105,7 @@ def resolve_configs(
         _ = _owner(provider.config_type, provider.name, owned, inactive)
     for value in given:
         _ = _owner(type(value), _STANDALONE, owned, inactive)
-    resolved_prepends = _resolve_prepends(prepends, owned)
+    resolved_prepends = _resolve_prepends(prepends, owned, inactive)
     alias_edges, skipped_aliases = _resolve_alias_edges(bundles, active_by_name)
     values: dict[str, object] = {}
     reports: dict[str, ConfigReport] = {}
@@ -165,14 +167,32 @@ def _owner(
 
 
 def _resolve_prepends(
-    prepends: Sequence[Prepend], owned: Mapping[type, str]
+    prepends: Sequence[Prepend], owned: Mapping[type, str], inactive: Mapping[type, str]
 ) -> list[tuple[Prepend, str | None]]:
-    """Resolve every prepend's target to an active bundle name, or ``None`` when inactive."""
+    """Resolve every prepend's target to an active bundle name, or ``None`` when inactive.
+
+    A name no bundle answers to — not active, not disabled for this
+    environment, not advertised by an installed package — is a typo, and
+    refused rather than skipped.
+
+    Raises:
+        ConfigProviderError: If a target names no bundle, or is a type no
+            active bundle owns.
+    """
+    known: set[str] | None = None
     resolved: list[tuple[Prepend, str | None]] = []
     for prepend in prepends:
         target = prepend.target
         if isinstance(target, str):
             name = target if target in owned.values() else None
+            if name is None:
+                if known is None:
+                    known = {*inactive.values(), *_advertised_bundle_names()}
+                if target not in known:
+                    raise ConfigProviderError(
+                        f"prepend by bundle {prepend.source}",
+                        f"no bundle is named {target!r}",
+                    )
         else:
             name = owned.get(target)
             if name is None:
@@ -370,3 +390,8 @@ def _checked(prepend: Prepend, config_type: type) -> Callable[[object], object]:
         return produced
 
     return apply
+
+
+def _advertised_bundle_names() -> set[str]:
+    """Return the names installed packages advertise their bundles under, importing none."""
+    return {entry.name for entry in entry_points(group=BUNDLES_ENTRY_POINT_GROUP)}

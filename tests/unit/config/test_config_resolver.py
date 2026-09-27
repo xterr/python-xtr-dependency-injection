@@ -8,6 +8,7 @@ import pytest
 from xtr_dependency_injection.builder.service_configurator import Prepend
 from xtr_dependency_injection.bundle import Bundle, BundleMetadata, NoConfig, as_bundle
 from xtr_dependency_injection.bundle.as_bundle import declare_bundle
+from xtr_dependency_injection.config import config_resolver
 from xtr_dependency_injection.config.config_resolver import resolve_configs
 from xtr_dependency_injection.config.configure import configure
 from xtr_dependency_injection.decorator.when import when
@@ -203,13 +204,38 @@ def test_a_prepend_to_an_inactive_bundle_is_reported_as_skipped() -> None:
     resolved = resolve_configs(
         bundles=(CoreBundle(), BusBundle()),
         providers=[],
-        inactive={},
+        inactive={LogConfig: "log"},
         prepends=(_prepend("bus", "log", _add_channel("bus")),),
     )
 
     ((prepend, reason),) = resolved.skipped
     assert prepend.endswith("(prepend by bundle bus)")
     assert reason == "target bundle is not active"
+
+
+def test_a_prepend_to_a_name_no_bundle_answers_to_is_refused() -> None:
+    with pytest.raises(ConfigProviderError, match="no bundle is named 'loging'"):
+        _ = resolve_configs(
+            bundles=(CoreBundle(), BusBundle()),
+            providers=[],
+            inactive={LogConfig: "log"},
+            prepends=(_prepend("bus", "loging", _add_channel("bus")),),
+        )
+
+
+def test_a_prepend_to_an_advertised_bundle_left_out_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_resolver, "_advertised_bundle_names", lambda: {"log"})
+
+    resolved = resolve_configs(
+        bundles=(CoreBundle(), BusBundle()),
+        providers=[],
+        inactive={},
+        prepends=(_prepend("bus", "log", _add_channel("bus")),),
+    )
+
+    assert [reason for _, reason in resolved.skipped] == ["target bundle is not active"]
 
 
 def test_a_prepend_returning_another_type_is_refused() -> None:
