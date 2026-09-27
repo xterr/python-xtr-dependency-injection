@@ -189,9 +189,13 @@ def _autowire_decorated_type(annotation: object) -> tuple[object, bool] | None:
 
 
 def _strip_none(annotation: object) -> tuple[object, bool]:
-    """Return ``(T, allows_none)`` for ``T``, ``T | None`` or ``Optional[T]``."""
+    """Return ``(T, allows_none)`` for ``T``, ``T | None`` or ``Optional[T]``.
+
+    ``Optional[T]`` has the origin ``typing.Union`` until Python 3.14 makes it
+    ``UnionType`` — compared by name, as naming it is deprecated.
+    """
     origin = get_origin(annotation)
-    if origin in _UNION_ORIGINS:
+    if origin in _UNION_ORIGINS or str(origin) == "typing.Union":
         args = cast("tuple[object, ...]", get_args(annotation))
         non_none = tuple(arg for arg in args if arg is not type(None))
         if len(non_none) == 1 and len(non_none) != len(args):

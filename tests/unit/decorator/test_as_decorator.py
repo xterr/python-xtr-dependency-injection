@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Annotated
+# Optional is the spelling under test, deprecated in favour of `X | None`.
+from typing import Annotated, Optional  # pyright: ignore[reportDeprecated]
 
 from xtr_dependency_injection.decorator.as_decorator import (
     AutowireDecorated,
+    DecoratedParameter,
     DecoratorMarker,
     OnInvalid,
     as_decorator,
+    decorated_parameter_of,
     decorator_of,
 )
 
@@ -40,3 +43,29 @@ def test_an_unmarked_class_is_not_a_decorator() -> None:
         pass
 
     assert decorator_of(Plain) is None
+
+
+class OptionalTracing:
+    def __init__(
+        self,
+        # The spelling under test: before Python 3.14 its origin is typing.Union.
+        inner: Annotated[Optional[Bus], AutowireDecorated()],  # noqa: UP045  # pyright: ignore[reportDeprecated]
+    ) -> None:
+        self.inner: Bus | None = inner
+
+
+class UnionTracing:
+    def __init__(self, inner: Annotated[Bus | None, AutowireDecorated()]) -> None:
+        self.inner: Bus | None = inner
+
+
+def test_an_optional_decorated_parameter_allows_none() -> None:
+    parameter = decorated_parameter_of(OptionalTracing, Bus)
+
+    assert parameter == DecoratedParameter(name="inner", allows_none=True)
+
+
+def test_a_union_with_none_decorated_parameter_allows_none() -> None:
+    parameter = decorated_parameter_of(UnionTracing, Bus)
+
+    assert parameter == DecoratedParameter(name="inner", allows_none=True)
