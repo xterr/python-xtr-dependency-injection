@@ -127,3 +127,28 @@ async def test_reset_skips_a_reference_whose_referent_is_gone() -> None:
     await resetter.reset()
 
     assert log == ["sync alive"]
+
+
+async def test_every_service_is_reset_when_one_fails_and_the_failures_are_raised_together() -> None:
+    reset: list[str] = []
+
+    class Failing:
+        def reset(self) -> None:
+            reset.append("failing")
+            msg = "cannot reset"
+            raise RuntimeError(msg)
+
+    class Fine:
+        def reset(self) -> None:
+            reset.append("fine")
+
+    failing, fine = Failing(), Fine()
+    resetter = ServicesResetter()
+    resetter.track(failing, "reset")
+    resetter.track(fine, "reset")
+
+    with pytest.raises(ExceptionGroup) as caught:
+        await resetter.reset()
+
+    assert reset == ["failing", "fine"]
+    assert [type(error) for error in caught.value.exceptions] == [RuntimeError]

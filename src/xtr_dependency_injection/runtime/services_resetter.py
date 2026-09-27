@@ -57,14 +57,27 @@ class ServicesResetter:
         self._tracked[key] = (reference, method)
 
     async def reset(self) -> None:
-        """Call each tracked service's reset method, in tracking order; sync or async."""
+        """Call each tracked service's reset method, in tracking order; sync or async.
+
+        Every service is reset, whichever of them fail: one left holding the
+        last unit of work's state would bleed it into the next.
+
+        Raises:
+            ExceptionGroup: Of what every failing reset raised, once all ran.
+        """
+        errors: list[Exception] = []
         for reference, method in list(self._tracked.values()):
             instance = reference()
             if instance is None:
                 continue
-            result = cast("object", getattr(instance, method)())
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = cast("object", getattr(instance, method)())
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as error:  # noqa: BLE001 — collected, and raised once every service is reset
+                errors.append(error)
+        if errors:
+            raise ExceptionGroup("services failed to reset", errors)
 
 
 def _strong(instance: object) -> Callable[[], object]:
