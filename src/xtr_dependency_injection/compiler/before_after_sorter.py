@@ -15,13 +15,12 @@ message verbatim in ``reason``.
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, Final
 
 from xtr_dependency_injection.exception.service_order_error import ServiceOrderError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
 __all__ = ["sort", "sort_with_priorities"]
 
@@ -30,7 +29,6 @@ _INT64_MIN: Final = -(2**63)
 _INT64_MAX: Final = 2**63 - 1
 _STATE_VISITING: Final = 1
 _STATE_VISITED: Final = 2
-_MIN_RECURSION_LIMIT: Final = 2000
 
 
 def sort(
@@ -75,7 +73,7 @@ def sort(
     states: dict[str, int] = {}
 
     for item in seed:
-        _visit(item, predecessors, states, sorted_items, [])
+        _visit(item, predecessors, states, sorted_items)
 
     return sorted_items
 
@@ -237,25 +235,40 @@ def _visit(
     predecessors: Mapping[str, Sequence[str]],
     states: dict[str, int],
     sorted_items: list[str],
-    path: list[str],
 ) -> None:
+    """Emit ``item`` after its predecessors, depth-first, with an explicit stack.
+
+    Iterative so a long chain of constraints cannot exhaust the interpreter's
+    recursion limit.
+    """
     if states.get(item, 0) == _STATE_VISITED:
         return
 
-    if states.get(item, 0) == _STATE_VISITING:
-        start = path.index(item)
-        cycle = [*path[start:], item]
-        joined = '" -> "'.join(cycle)
-        raise ServiceOrderError(f'Cycle detected in the "before"/"after" constraints: "{joined}".')
-
     states[item] = _STATE_VISITING
-    path = [*path, item]
+    path: list[str] = [item]
+    stack: list[tuple[str, Iterator[str]]] = [(item, iter(predecessors[item]))]
 
-    for predecessor in predecessors[item]:
-        _visit(predecessor, predecessors, states, sorted_items, path)
-
-    states[item] = _STATE_VISITED
-    sorted_items.append(item)
+    while stack:
+        current, pending = stack[-1]
+        for predecessor in pending:
+            state = states.get(predecessor, 0)
+            if state == _STATE_VISITED:
+                continue
+            if state == _STATE_VISITING:
+                cycle = [*path[path.index(predecessor) :], predecessor]
+                joined = '" -> "'.join(cycle)
+                raise ServiceOrderError(
+                    f'Cycle detected in the "before"/"after" constraints: "{joined}".'
+                )
+            states[predecessor] = _STATE_VISITING
+            path.append(predecessor)
+            stack.append((predecessor, iter(predecessors[predecessor])))
+            break
+        else:
+            _ = stack.pop()
+            _ = path.pop()
+            states[current] = _STATE_VISITED
+            sorted_items.append(current)
 
 
 def _contradiction_message(  # noqa: PLR0913, PLR0917 — six discrete fields for the error message.
@@ -287,7 +300,3 @@ def _ordering_message(previous: str, previous_priority: int, item: str, priority
         f'The "before"/"after" constraints put "{previous}" (priority {previous_priority}) ahead '
         f'of "{item}" (priority {priority}), which their priorities do not allow.'
     )
-
-
-if sys.getrecursionlimit() < _MIN_RECURSION_LIMIT:  # pragma: no cover
-    sys.setrecursionlimit(_MIN_RECURSION_LIMIT)

@@ -5,6 +5,8 @@ Seed order, before/after moves, priority ties, cycles, and unsatisfiable constra
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from xtr_dependency_injection.compiler.before_after_sorter import sort, sort_with_priorities
@@ -203,6 +205,14 @@ def test_an_indirect_cycle_is_reported() -> None:
                 "c": {"before": ["a"]},
             },
         )
+
+
+def test_a_chain_deeper_than_the_recursion_limit_is_sorted() -> None:
+    depth = sys.getrecursionlimit() * 2
+    items = [f"i{index}" for index in range(depth)]
+    constraints = {item: {"after": [items[index + 1]]} for index, item in enumerate(items[:-1])}
+
+    assert sort(items, constraints) == items[::-1]
 
 
 def test_an_item_referencing_itself_is_ignored() -> None:
