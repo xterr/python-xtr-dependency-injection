@@ -364,8 +364,9 @@ nested mappings and never override: a leaf set twice is a `ParameterConflictErro
 both sources.
 
 `kernel.share_dir` is where the processes of one application share files on a machine —
-cache files, lock files: `<system temporary directory>/xtr/<digest of the project directory>`.
-Nothing is written into the project, two projects never share it, and nothing is created until
+cache files, lock files: `var/share` in the project directory. It belongs to whoever owns the
+project, so no other user of the machine can have created it first, as anyone can in the
+system's temporary directory. Keep `var/` out of version control; nothing is created until
 something writes there.
 
 ```python

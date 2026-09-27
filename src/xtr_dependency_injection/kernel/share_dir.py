@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-import hashlib
-import tempfile
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = ["share_dir"]
 
-_DIGEST_LENGTH: Final = 16
-
 
 def share_dir(project_dir: Path) -> Path:
-    """Return the project's own directory under the system's temporary one.
+    """Return ``var/share`` in the project: where the project's processes share files.
 
     Cache files, lock files — whatever the processes of one application share
-    on a machine goes here. It is the project directory's digest rather than
-    a directory inside the project, so nothing is ever written into the
-    source tree and two projects on one machine never share files. Nothing is
-    created: whatever writes first creates what it needs.
+    on a machine goes here. Inside the project it belongs to whoever owns the
+    project, and no other user of the machine can have made it first, as
+    anyone can in the system's temporary directory; keep ``var/`` out of
+    version control. Nothing is created: whatever writes first creates what it
+    needs.
     """
-    digest = hashlib.sha256(str(project_dir).encode()).hexdigest()[:_DIGEST_LENGTH]
-    return Path(tempfile.gettempdir()) / "xtr" / digest
+    return project_dir / "var" / "share"
