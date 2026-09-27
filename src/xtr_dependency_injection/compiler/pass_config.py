@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, final
 
+from xtr_dependency_injection.exception import InvalidArgumentTypeError
+
 from .attribute_autoconfiguration_pass import AttributeAutoconfigurationPass
 from .autowire_as_decorator_pass import AutowireAsDecoratorPass
 from .check_definition_validity_pass import CheckDefinitionValidityPass
@@ -95,7 +97,7 @@ class PassConfig:
         """
         if not isinstance(compiler_pass, CompilerPassInterface):  # pyright: ignore[reportUnnecessaryIsInstance] — callers outside the type checker.
             msg = f"{compiler_pass!r} does not implement CompilerPassInterface"  # pyright: ignore[reportUnreachable]
-            raise TypeError(msg)
+            raise InvalidArgumentTypeError(msg)
         self._passes[stage].setdefault(priority, []).append(compiler_pass)
 
     def get_before_optimization_passes(self) -> list[CompilerPassInterface]:

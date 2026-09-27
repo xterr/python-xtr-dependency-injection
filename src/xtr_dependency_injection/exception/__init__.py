@@ -18,6 +18,8 @@ from .dependency_injection_error import DependencyInjectionError
 from .duplicate_bundle_error import DuplicateBundleError
 from .duplicate_service_error import DuplicateServiceError
 from .env_placeholder_error import EnvPlaceholderError
+from .invalid_argument_error import InvalidArgumentError
+from .invalid_argument_type_error import InvalidArgumentTypeError
 from .invalid_definition_error import InvalidDefinitionError
 from .invalid_environment_error import InvalidEnvironmentError
 from .invalid_environment_variable_error import InvalidEnvironmentVariableError
@@ -50,6 +52,8 @@ __all__ = [
     "DuplicateBundleError",
     "DuplicateServiceError",
     "EnvPlaceholderError",
+    "InvalidArgumentError",
+    "InvalidArgumentTypeError",
     "InvalidDefinitionError",
     "InvalidEnvironmentError",
     "InvalidEnvironmentVariableError",

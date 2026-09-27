@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Literal
 
 from xtr_dependency_injection.compiler._wireup_bridge import key_type
 from xtr_dependency_injection.compiler.compiler import Compiler
-from xtr_dependency_injection.exception import BuilderFrozenError, BuilderPhaseError
+from xtr_dependency_injection.exception import (
+    BuilderFrozenError,
+    BuilderPhaseError,
+    InvalidArgumentTypeError,
+)
 from xtr_dependency_injection.parameter_bag.env_placeholder_parameter_bag import (
     EnvPlaceholderParameterBag,
 )
@@ -200,7 +204,7 @@ class ServiceConfigurator:
             kind = "factory"
         else:
             msg = f"set() takes a class or a function, not {target!r}"
-            raise TypeError(msg)
+            raise InvalidArgumentTypeError(msg)
         existing = self._state.store.get(key)
         if existing is not None and existing.provider is target:
             return existing

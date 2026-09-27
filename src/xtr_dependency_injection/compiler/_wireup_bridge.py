@@ -24,6 +24,7 @@ from wireup.ioc.type_analysis import analyze_type
 from xtr_dependency_injection.config.env_placeholder import env_parameter
 from xtr_dependency_injection.decorator.autowire import Autowire
 from xtr_dependency_injection.decorator.target import Target
+from xtr_dependency_injection.exception import InvalidArgumentError
 
 if TYPE_CHECKING:
     import inspect
@@ -155,7 +156,7 @@ def _merge_target(metadata: list[object]) -> list[object]:
             "a parameter is injected from a parameter, from the environment, or as a "
             "qualified service"
         )
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     return [entry for entry in metadata if not isinstance(entry, Autowire)]
 
 

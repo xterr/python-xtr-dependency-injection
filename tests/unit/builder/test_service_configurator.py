@@ -12,7 +12,11 @@ from xtr_dependency_injection.builder.service_configurator import (
     Phase,
     ServiceConfigurator,
 )
-from xtr_dependency_injection.exception import BuilderFrozenError, BuilderPhaseError
+from xtr_dependency_injection.exception import (
+    BuilderFrozenError,
+    BuilderPhaseError,
+    DependencyInjectionError,
+)
 
 
 class Mailer:
@@ -79,8 +83,10 @@ def test_a_factory_without_a_return_type_is_refused() -> None:
 
 
 def test_set_of_something_that_is_not_a_class_or_a_function_is_refused() -> None:
-    with pytest.raises(TypeError, match="takes a class or a function"):
+    with pytest.raises(TypeError, match="takes a class or a function") as caught:
         _ = _services().set(Mailer())  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+
+    assert isinstance(caught.value, DependencyInjectionError)
 
 
 def test_set_registers_a_class_under_its_own_type() -> None:

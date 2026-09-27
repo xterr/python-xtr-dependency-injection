@@ -1021,6 +1021,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `ContainerCompilationError` | The engine failed to compile the container |
 | `ServiceResolutionError` | The engine failed to build a registered service |
 | `ServiceNotFoundError` / `ParameterNotFoundError` | `container.get` / `get_parameter` miss (`LookupError`) |
+| `InvalidArgumentTypeError` / `InvalidArgumentError` | An API given something of the wrong kind (`TypeError`) / a value it cannot use (`ValueError`) — `services.set` given neither a class nor a function, `Target` beside `Autowire(param=...)` |
 | `BuilderPhaseError` / `BuilderFrozenError` | A builder operation in the wrong phase / after compilation |
 | `KernelAlreadyBootedError` | A compiled kernel booted twice |
 | `UnknownLocatorKeyError` | `ServiceLocator.get` with an unknown name (`LookupError`) |

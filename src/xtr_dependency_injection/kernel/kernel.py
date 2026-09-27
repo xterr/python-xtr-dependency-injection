@@ -55,6 +55,7 @@ from xtr_dependency_injection.diagnostics import DefinitionReport
 from xtr_dependency_injection.diagnostics.report import KernelReport, ReportBuilder
 from xtr_dependency_injection.exception import (
     BundleDefinitionError,
+    InvalidArgumentTypeError,
     InvalidEnvironmentError,
     InvalidEnvironmentVariableError,
     ResourceImportError,
@@ -283,7 +284,7 @@ class Kernel:
             result = await call_injected(booted._engine, main)  # noqa: SLF001 — the kernel owns the engine.  # pyright: ignore[reportPrivateUsage]
         if not isinstance(result, int) or isinstance(result, bool):
             msg = f"{getattr(main, '__qualname__', main)!r} returned {result!r}, not an exit code"
-            raise TypeError(msg)
+            raise InvalidArgumentTypeError(msg)
         return result
 
     @property

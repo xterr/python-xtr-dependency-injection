@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
 
 from xtr_dependency_injection.compiler.compiler_pass_interface import CompilerPassInterface
 from xtr_dependency_injection.compiler.pass_stage import PassStage
+from xtr_dependency_injection.exception import InvalidArgumentTypeError
 
 from ._marker import own_marker, set_marker
 
@@ -56,7 +57,7 @@ def compiler_pass(
     def record(target: P) -> P:
         if not (isinstance(target, type) and issubclass(target, CompilerPassInterface)):  # pyright: ignore[reportUnnecessaryIsInstance] — callers outside the type checker.
             msg = f"@compiler_pass needs a class implementing CompilerPassInterface, not {target!r}"  # pyright: ignore[reportUnreachable]
-            raise TypeError(msg)
+            raise InvalidArgumentTypeError(msg)
         return set_marker(target, _ATTRIBUTE, CompilerPassMarker(priority, stage))
 
     return record(cls) if cls is not None else record

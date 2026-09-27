@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from types import UnionType
 from typing import TYPE_CHECKING, Annotated, TypeVar, cast, get_args, get_origin
 
+from xtr_dependency_injection.exception import InvalidArgumentError
+
 from .target import Target
 
 if TYPE_CHECKING:
@@ -64,7 +66,7 @@ class Autowire:
         """Refuse naming both a parameter and an environment variable."""
         if self.param is not None and self.env is not None:
             msg = "Autowire takes param= or env=, not both"
-            raise ValueError(msg)
+            raise InvalidArgumentError(msg)
 
 
 T = TypeVar("T")

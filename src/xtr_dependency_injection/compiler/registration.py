@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, TypeAlias, cast
 from xtr_service_contracts import ContainerInterface
 
 from xtr_dependency_injection.config.env_placeholder import env_placeholders_in
+from xtr_dependency_injection.exception import InvalidArgumentError
 from xtr_dependency_injection.exception._signatures import evaluated_signature
 
 from ._wireup_bridge import REGISTRATION_ATTRIBUTE, parameter_injections, to_engine_signature
@@ -206,7 +207,7 @@ def _null_decorator_factory(
     signature = evaluated_signature(base_factory)
     if inner_parameter not in signature.parameters:
         msg = f"cannot fill parameter {inner_parameter!r} of {decorator!r} with None"
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     parameters = [p for p in signature.parameters.values() if p.name != inner_parameter]
 
     def fill_none(kwargs: dict[str, object]) -> dict[str, object]:
@@ -240,7 +241,7 @@ def _decorating_factory(
     names = [parameter.name for parameter in parameters]
     if inner_parameter not in names or _INNER_BOX_PARAMETER in names:
         msg = f"cannot box parameter {inner_parameter!r} of {factory!r}"
-        raise ValueError(msg)
+        raise InvalidArgumentError(msg)
     index = names.index(inner_parameter)
     parameters[index] = inspect.Parameter(
         _INNER_BOX_PARAMETER, inspect.Parameter.KEYWORD_ONLY, annotation=box

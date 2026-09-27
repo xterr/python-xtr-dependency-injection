@@ -19,6 +19,7 @@ from xtr_dependency_injection.compiler._wireup_bridge import (
     parameter_injections,
     to_engine_signature,
 )
+from xtr_dependency_injection.exception import InvalidArgumentTypeError
 from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.exception._signatures import evaluated_signature
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
@@ -77,7 +78,7 @@ def bind_callable(
     """
     if not isinstance(container, WireupContainer):
         msg = "bind_callable needs a kernel-provided container"
-        raise TypeError(msg)
+        raise InvalidArgumentTypeError(msg)
     engine = container._engine()  # noqa: SLF001 — the binder owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
     declared = signature if signature is not None else _signature_of(target)
     presented = to_engine_signature(declared)
@@ -138,7 +139,7 @@ def _signature_of(target: Callable[..., object] | type) -> inspect.Signature:
         )
         if declared is None:
             msg = f"{target.__qualname__} has no __call__ to bind"
-            raise TypeError(msg)
+            raise InvalidArgumentTypeError(msg)
         callable_target = cast("Callable[..., object]", declared)
     signature = evaluated_signature(callable_target, context=f"binding {qualified_name(target)}")
     if isinstance(target, type):

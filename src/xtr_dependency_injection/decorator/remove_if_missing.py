@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final, TypeVar, cast
 
+from xtr_dependency_injection.exception import InvalidArgumentTypeError
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Hashable
 
@@ -63,10 +65,10 @@ def remove_if_missing(
     ]
     if not provided:
         msg = "@remove_if_missing requires one of service=, class_= or package="
-        raise TypeError(msg)
+        raise InvalidArgumentTypeError(msg)
     if qualifier is not None and service is None:
         msg = "@remove_if_missing qualifier= only makes sense with service="
-        raise TypeError(msg)
+        raise InvalidArgumentTypeError(msg)
 
     attributes: dict[str, object] = {}
     if service is not None:

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from xtr_dependency_injection.compiler.wireup_compiler import compile_container
 from xtr_dependency_injection.config.env_placeholder import ENV_PARAMETERS_ROOT, env_tokens
 from xtr_dependency_injection.config.parameters import merge_parameters
-from xtr_dependency_injection.exception import ConfigProviderError
+from xtr_dependency_injection.exception import ConfigProviderError, InvalidArgumentTypeError
 from xtr_dependency_injection.kernel.booted_kernel import BootedKernel
 from xtr_dependency_injection.kernel.compiled_kernel import CompiledKernel
 from xtr_dependency_injection.kernel.kernel import prepare
@@ -177,5 +177,5 @@ def engine_container(kernel: CompiledKernel | BootedKernel, /) -> AsyncContainer
     # that hand us a mock); every legitimate caller has the union type.
     if not isinstance(kernel, (CompiledKernel, BootedKernel)):  # pyright: ignore[reportUnnecessaryIsInstance]
         message = "engine_container needs a CompiledKernel or BootedKernel"  # pyright: ignore[reportUnreachable]
-        raise TypeError(message)
+        raise InvalidArgumentTypeError(message)
     return kernel._engine  # noqa: SLF001 — the integration module owns this contract.  # pyright: ignore[reportPrivateUsage]
