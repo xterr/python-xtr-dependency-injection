@@ -20,9 +20,11 @@ from tests.support.bundles import (
     Plugin,
 )
 from xtr_dependency_injection.exception import (
+    BundleDefinitionError,
     DuplicateServiceError,
     InvalidEnvironmentError,
     KernelAlreadyBootedError,
+    ResourceImportError,
 )
 from xtr_dependency_injection.kernel import Kernel, KernelInterface
 from xtr_dependency_injection.runtime.services_resetter import ServicesResetter
@@ -334,3 +336,28 @@ def test_a_package_without_bundles_module_yields_only_the_kernel_bundle() -> Non
 
     active = {report.name for report in compiled.report.bundles if report.state == "active"}
     assert active == {"kernel"}
+
+
+def test_a_bundles_module_failing_on_a_deeper_import_names_itself() -> None:
+    kernel = Kernel("tests.fixtures.bundles_modules.deep_import", resources=())
+
+    with pytest.raises(ResourceImportError) as caught:
+        _ = kernel.build()
+
+    assert "tests.fixtures.bundles_modules.deep_import.bundles" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("package", "reason"),
+    [
+        ("no_bundles", "does not define BUNDLES"),
+        ("not_a_mapping", "BUNDLES must be a mapping"),
+        ("not_a_bundle", "is not a Bundle subclass"),
+        ("flags_not_a_mapping", "must be a mapping"),
+    ],
+)
+def test_a_bundles_module_listing_wrongly_is_refused_saying_why(package: str, reason: str) -> None:
+    kernel = Kernel(f"tests.fixtures.bundles_modules.{package}", resources=())
+
+    with pytest.raises(BundleDefinitionError, match=reason):
+        _ = kernel.build()

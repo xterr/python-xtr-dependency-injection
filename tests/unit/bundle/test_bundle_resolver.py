@@ -246,3 +246,25 @@ def test_reports_include_required_names() -> None:
 
     ((alpha_report,),) = ([r for r in resolved.reports if r.name == "alpha"],)
     assert alpha_report.required == ("beta",)
+
+
+def test_a_bundle_both_listed_and_required_is_built_once_and_reported_as_listed() -> None:
+    resolved = resolve_bundles(
+        core=CoreBundle(),
+        listed={AlphaBundle: {"all": True}, BetaBundle: {"all": True}},
+        env="dev",
+    )
+
+    betas = [bundle for bundle in resolved.bundles if isinstance(bundle, BetaBundle)]
+    (report,) = [report for report in resolved.reports if report.name == "beta"]
+    assert len(betas) == 1
+    assert report.source == "listed"
+
+
+def test_a_bundle_listed_off_in_this_env_but_required_by_an_active_one_is_active() -> None:
+    order = _resolve(
+        {AlphaBundle: {"all": True}, BetaBundle: {"dev": True}},
+        env="prod",
+    )
+
+    assert order == ["kernel", "beta", "alpha"]

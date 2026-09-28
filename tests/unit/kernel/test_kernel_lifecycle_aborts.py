@@ -134,3 +134,40 @@ async def test_a_shutdown_aborted_by_a_base_exception_still_closes_the_container
         await booted.shutdown()
 
     assert _closed == [True]
+
+
+@as_bundle("res_fails_shutdown")
+class FailingShutdownBundle(Bundle):
+    """Boots fine, then fails as it shuts down."""
+
+    @override
+    async def shutdown(self) -> None:
+        message = "shutdown failed"
+        raise RuntimeError(message)
+
+
+@required_bundle(FailingShutdownBundle)
+@as_bundle("res_fails_boot")
+class FailingBootBundle(Bundle):
+    """Boots after ``res_fails_shutdown`` and fails."""
+
+    @override
+    async def boot(self) -> None:
+        message = "boot failed"
+        raise ValueError(message)
+
+
+async def test_a_boot_failure_keeps_its_error_and_notes_the_failed_rollback() -> None:
+    compiled = Kernel(
+        _PACKAGE,
+        env="dev",
+        bundles={FailingBootBundle: {"all": True}},
+        resources=(),
+    ).build()
+
+    with pytest.raises(ValueError, match="boot failed") as caught:
+        _ = await compiled.boot()
+
+    (note,) = caught.value.__notes__
+    assert note.startswith("shutting down after the failed boot also failed")
+    assert "shutdown failed" in note
