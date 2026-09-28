@@ -13,6 +13,8 @@ from __future__ import annotations
 import importlib.util
 from typing import TYPE_CHECKING, Final
 
+from xtr_dependency_injection.exception import InvalidArgumentTypeError
+
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
@@ -69,13 +71,14 @@ def set_dependency(
         qualifier: The qualifier a service resolution carries, if any.
 
     Raises:
-        TypeError: If ``given`` holds anything the framework's copy never
-            passes — every argument, when the framework is absent.
+        InvalidArgumentTypeError: If ``given`` holds anything the framework's
+            copy never passes — every argument, when the framework is absent.
+            Also a :class:`TypeError`, as an unexpected keyword always is.
     """
     unexpected = set(given) - _COPY_ARGUMENTS if IS_DEPENDENCY else set(given)
     if unexpected:
         msg = f"unexpected arguments: {', '.join(sorted(unexpected))}"
-        raise TypeError(msg)
+        raise InvalidArgumentTypeError(msg)
     if not IS_DEPENDENCY:
         return
     dependency = given.get("dependency")

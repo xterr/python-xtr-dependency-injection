@@ -13,6 +13,7 @@ from fastapi.params import Depends
 from xtr_dependency_injection import Autowire, Injected, Target
 from xtr_dependency_injection.decorator import _dependency_base
 from xtr_dependency_injection.decorator._dependency_base import set_dependency
+from xtr_dependency_injection.exception import InvalidArgumentTypeError
 from xtr_dependency_injection.integration import _resolvers
 from xtr_dependency_injection.integration.fastapi import provider
 
@@ -95,7 +96,7 @@ def test_equal_markers_carry_the_same_resolver() -> None:
 
 
 def test_arguments_the_framework_copy_never_passes_are_refused() -> None:
-    with pytest.raises(TypeError, match="unexpected arguments: colour"):
+    with pytest.raises(InvalidArgumentTypeError, match="unexpected arguments: colour"):
         _ = Autowire(colour="blue")
 
 
@@ -104,7 +105,9 @@ def test_without_the_framework_extra_arguments_are_refused(
 ) -> None:
     monkeypatch.setattr(_dependency_base, "IS_DEPENDENCY", False)
 
-    with pytest.raises(TypeError, match="unexpected arguments: dependency, use_cache"):
+    with pytest.raises(
+        InvalidArgumentTypeError, match="unexpected arguments: dependency, use_cache"
+    ):
         set_dependency(object(), {"use_cache": False, "dependency": None})
 
 
