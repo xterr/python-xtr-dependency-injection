@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from wireup import AsyncContainer
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
+    from xtr_dependency_injection.kernel.kernel import Prepared
 
 __all__ = ["create_container", "engine_container", "injectables"]
 
@@ -74,17 +75,7 @@ def injectables(
             parameters: wireup's ``config=`` is the caller's, so parameters
             need :func:`create_container` or the kernel.
     """
-    listed = {bundle_type: {"all": True} for bundle_type in bundles}
-    prepared = prepare(
-        name="standalone",
-        environment=env,
-        debug=False,
-        project_dir=Path.cwd(),
-        listed=listed,
-        resources=scan,
-        exclude=DEFAULT_EXCLUDES,
-        given=configs,
-    )
+    prepared = _prepared(bundles, configs, env, scan)
     state = prepared.assembly.state
     sources = [
         origin.name if origin.kind == "app" else str(origin)
@@ -131,18 +122,7 @@ def create_container(  # noqa: PLR0913 — the pipeline's inputs, plus the calle
             source sets.
         ContainerCompilationError: If the engine refuses the container.
     """
-    listed = {bundle_type: {"all": True} for bundle_type in bundles}
-    prepared = prepare(
-        name="standalone",
-        environment=env,
-        debug=False,
-        project_dir=Path.cwd(),
-        listed=listed,
-        resources=scan,
-        exclude=DEFAULT_EXCLUDES,
-        given=configs,
-        environ=environ,
-    )
+    prepared = _prepared(bundles, configs, env, scan, environ)
     sources = [
         (origin.name if origin.kind == "app" else str(origin), values)
         for origin, values in prepared.assembly.state.parameters
@@ -156,6 +136,27 @@ def create_container(  # noqa: PLR0913 — the pipeline's inputs, plus the calle
     )
     _ = prepared.finish_report()
     return container
+
+
+def _prepared(
+    bundles: Sequence[type[AnyBundle]],
+    configs: Sequence[object],
+    env: str,
+    scan: Sequence[str | ModuleType],
+    environ: Mapping[str, str] | None = None,
+) -> Prepared:
+    """Run the standalone pipeline: every bundle given, active in every environment."""
+    return prepare(
+        name="standalone",
+        environment=env,
+        debug=False,
+        project_dir=Path.cwd(),
+        listed={bundle_type: {"all": True} for bundle_type in bundles},
+        resources=scan,
+        exclude=DEFAULT_EXCLUDES,
+        given=configs,
+        environ=environ,
+    )
 
 
 def engine_container(kernel: CompiledKernel | BootedKernel, /) -> AsyncContainer:
