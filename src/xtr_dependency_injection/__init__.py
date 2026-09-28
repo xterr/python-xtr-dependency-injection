@@ -1,7 +1,8 @@
 """A bundle and kernel layer for the xtr libraries, built on wireup.
 
-Each library ships one bundle; installed bundles register themselves; an
-application is one ``Kernel("app")`` line plus decorators. What comes out is a
+Each library ships one bundle; an application lists the bundles it wants in
+its ``bundles.py`` — installing a package activates nothing — and the peers a
+bundle requires arrive through ``@required_bundle``. What comes out is a
 plain wireup ``AsyncContainer``: this package decides *what* goes into it, in
 *which order*, *for which environment*, and runs the lifecycle around it.
 """
