@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, TypeVar
 
 import pytest
 from typing_extensions import override
+from wireup import AsyncContainer
 
 from tests.fixtures.app_env import (
     EVENTS,
@@ -45,9 +46,14 @@ from xtr_dependency_injection.exception import (
     MissingEnvironmentVariableError,
     ServiceResolutionError,
 )
+from xtr_dependency_injection.kernel.kernel_bundle import container_bag
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
+    from xtr_service_contracts import ContainerInterface
+
     from xtr_dependency_injection import ContainerBuilder, ServiceConfigurator
 
 pytestmark = pytest.mark.anyio
@@ -277,3 +283,36 @@ def test_a_placeholder_cannot_decide_structure() -> None:
 
     with pytest.raises(EnvPlaceholderError, match="cannot decide"):
         _ = kernel.build()
+
+
+_T = TypeVar("_T")
+
+
+class _OtherContainer:
+    """A container interface a test puts in place of the kernel's own; it knows no parameter."""
+
+    async def get(self, service: type[_T], /, qualifier: Hashable | None = None) -> _T:
+        del service, qualifier
+        raise NotImplementedError
+
+    def has(self, service: type[object], /, qualifier: Hashable | None = None) -> bool:
+        del service, qualifier
+        return False
+
+    def get_parameter(self, name: str, /) -> object:
+        del name
+        raise NotImplementedError
+
+    def has_parameter(self, name: str, /) -> bool:
+        del name
+        return False
+
+
+async def test_the_container_bag_reads_the_parameters_off_the_engine_not_the_interface() -> None:
+    async with await _kernel(ENVIRON).boot() as booted:
+        engine = await booted.container.get(AsyncContainer)
+
+        other: ContainerInterface = _OtherContainer()
+        bag = container_bag(other, engine)
+
+    assert "app" in bag.all()

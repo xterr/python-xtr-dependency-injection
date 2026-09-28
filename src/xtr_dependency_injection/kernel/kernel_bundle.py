@@ -9,7 +9,7 @@ the kernel, right after this bundle's ``load_extension`` returns.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast, final
+from typing import TYPE_CHECKING, final
 
 from typing_extensions import override
 from wireup import AsyncContainer
@@ -45,10 +45,13 @@ if TYPE_CHECKING:
 __all__ = ["KernelBundle"]
 
 
-def container_bag(container: ContainerInterface) -> ContainerBagInterface:
-    """Expose the compiled container's parameters as an injectable, read-only bag."""
-    parameters = cast("WireupContainer", container).get_parameters()
-    return ContainerBag(container, parameters)
+def container_bag(container: ContainerInterface, engine: AsyncContainer) -> ContainerBagInterface:
+    """Expose the compiled container's parameters as an injectable, read-only bag.
+
+    The parameters are read off the engine itself: the container interface
+    may be replaced — by a test's override — and need not know them.
+    """
+    return ContainerBag(container, WireupContainer(engine).get_parameters())
 
 
 def container_interface(container: AsyncContainer) -> ContainerInterface:
