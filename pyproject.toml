@@ -26,10 +26,10 @@ dependencies = [
 ]
 
 # The injection markers double as dependency declarations for applications
-# served over HTTP; 0.121 is the first release whose Depends carries a scope.
+# served over HTTP; 0.121.0 introduced scoped dependency markers, 0.121.3 made Depends frozen.
 [project.optional-dependencies]
 fastapi = [
-    "fastapi>=0.121",
+    "fastapi>=0.121.3",
 ]
 
 [dependency-groups]
@@ -42,7 +42,7 @@ dev = [
     "ty>=0.0.83",
     # The markers behave differently when the web framework is importable, so
     # the suite runs with it installed and pins the other path in a subprocess.
-    "fastapi>=0.121",
+    "fastapi>=0.121.3",
     "httpx>=0.27",
 ]
 
