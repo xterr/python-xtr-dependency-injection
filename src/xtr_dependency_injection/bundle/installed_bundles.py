@@ -32,8 +32,9 @@ def installed_bundles() -> tuple[type[AnyBundle], ...]:
     """Return every bundle class an installed distribution advertises, each once.
 
     Each advertised target is imported, so call this from a diagnostic, not
-    from a build. A target that cannot be imported — its package installed
-    without the extra its bundle needs — is not usable here, and one that is
+    from a build. A target that cannot be loaded — its package installed
+    without the extra its bundle needs, a name its module does not define, a
+    module that fails as it is imported — is not usable here, and one that is
     not a class decorated with ``@as_bundle`` is not a bundle: both are
     skipped rather than failing the diagnostic.
     """
@@ -42,7 +43,7 @@ def installed_bundles() -> tuple[type[AnyBundle], ...]:
         load: Callable[[], object] = entry.load
         try:
             advertised = load()
-        except ImportError:
+        except Exception:  # noqa: BLE001, S112 — another distribution's code; one broken entry must not hide the rest.
             continue
         if not (isinstance(advertised, type) and issubclass(advertised, Bundle)):
             continue

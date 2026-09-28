@@ -65,3 +65,21 @@ def test_it_returns_a_bundle_advertised_twice_once(monkeypatch: pytest.MonkeyPat
     )
 
     assert installed_bundles() == (EchoBundle,)
+
+
+def test_it_skips_a_target_its_module_does_not_define(monkeypatch: pytest.MonkeyPatch) -> None:
+    _advertise(
+        monkeypatch,
+        missing="tests.support.bundles:NoSuchBundle",
+        echo="tests.support.bundles:EchoBundle",
+    )
+
+    assert installed_bundles() == (EchoBundle,)
+
+
+def test_it_skips_a_target_whose_module_fails_as_it_is_imported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _advertise(monkeypatch, broken="tests.fixtures.failing_on_import:Bundle")
+
+    assert installed_bundles() == ()

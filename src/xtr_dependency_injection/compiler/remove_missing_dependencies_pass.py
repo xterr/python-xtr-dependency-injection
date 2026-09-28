@@ -128,7 +128,7 @@ def _class_importable(path: str) -> bool:
         return False
     try:
         loaded = importlib.import_module(module)
-    except ImportError:
+    except Exception:  # noqa: BLE001 — a module that fails as it is imported is as missing as an absent one.
         return False
     return hasattr(loaded, attribute)
 

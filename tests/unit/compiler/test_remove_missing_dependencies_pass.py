@@ -159,3 +159,12 @@ def test_it_does_nothing_without_any_tag() -> None:
     _process(state)
 
     assert state.store.get((Alpha, None)) is not None
+
+
+def test_a_module_failing_as_it_is_imported_drops_the_definition() -> None:
+    state = _state()
+    _ = _tagged(state, Alpha, class_="tests.fixtures.failing_on_import:Anything")
+
+    _process(state)
+
+    assert state.store.get((Alpha, None)) is None
