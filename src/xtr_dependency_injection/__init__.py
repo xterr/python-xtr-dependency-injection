@@ -42,6 +42,7 @@ from .decorator import (
     when_not,
 )
 from .diagnostics import KernelReport
+from .exception import FastapiIntegrationError
 from .exception._naming import qualified_name
 from .kernel import BootedKernel, CompiledKernel, Kernel, KernelInterface
 from .parameter_bag import ContainerBagInterface, ParameterBagInterface
@@ -74,6 +75,7 @@ __all__ = [
     "EnvVarLoaderInterface",
     "EnvVarProcessor",
     "EnvVarProcessorInterface",
+    "FastapiIntegrationError",
     "Injected",
     "Kernel",
     "KernelInterface",

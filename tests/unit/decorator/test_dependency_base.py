@@ -13,7 +13,7 @@ from fastapi.params import Depends
 from xtr_dependency_injection import Autowire, Injected, Target
 from xtr_dependency_injection.decorator import _dependency_base
 from xtr_dependency_injection.decorator._dependency_base import set_dependency
-from xtr_dependency_injection.integration import fastapi as integration_fastapi
+from xtr_dependency_injection.integration import _resolvers
 from xtr_dependency_injection.integration.fastapi import provider
 
 if TYPE_CHECKING:
@@ -142,7 +142,7 @@ async def test_a_route_declaring_a_bare_marker_learns_which_service_it_stands_fo
 
         return resolve
 
-    monkeypatch.setattr(integration_fastapi, "provider", fake_provider)
+    monkeypatch.setattr(_resolvers, "provider", fake_provider)
     app = FastAPI()
 
     @app.get("/greeting")

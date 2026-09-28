@@ -20,6 +20,7 @@ from .dependency_injection_error import DependencyInjectionError
 from .duplicate_bundle_error import DuplicateBundleError
 from .duplicate_service_error import DuplicateServiceError
 from .env_placeholder_error import EnvPlaceholderError
+from .fastapi_integration_error import FastapiIntegrationError
 from .invalid_argument_error import InvalidArgumentError
 from .invalid_argument_type_error import InvalidArgumentTypeError
 from .invalid_definition_error import InvalidDefinitionError
@@ -54,6 +55,7 @@ __all__ = [
     "DuplicateBundleError",
     "DuplicateServiceError",
     "EnvPlaceholderError",
+    "FastapiIntegrationError",
     "InvalidArgumentError",
     "InvalidArgumentTypeError",
     "InvalidDefinitionError",

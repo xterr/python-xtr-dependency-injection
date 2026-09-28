@@ -32,6 +32,7 @@ PUBLIC = {
     "EnvVarLoaderInterface",
     "EnvVarProcessor",
     "EnvVarProcessorInterface",
+    "FastapiIntegrationError",
     "ServiceKey",
     "Origin",
     "configure",

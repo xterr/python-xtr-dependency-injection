@@ -1,53 +1,60 @@
-"""The resolvers the injection markers hand the web framework.
+"""The seam between a served application and a kernel, and the markers' resolvers.
 
-A marker that names a parameter, an environment variable or a service becomes
-a framework dependency whose ``dependency`` is one resolver from here — one
-per ``(kind, key, qualifier)``, cached so equal markers stay equal. Serving an
-application takes the HTTP kernel package on top: until its setup call
-attaches a kernel, a resolver that runs can only say what is missing.
+:func:`attach` stores a compiled kernel's container on the application's
+state; :func:`request_scope` opens the container scope one request's scoped
+services live in; :func:`provider` derives the resolver a marker becomes.
+Serving an application takes the HTTP kernel package on top: until its setup
+call attaches a kernel, a resolver that runs can only say what is missing.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
+from xtr_dependency_injection.exception import FastapiIntegrationError
+from xtr_dependency_injection.integration._resolvers import (
+    STATE_KEY,
+    AttachedKernel,
+    attached_kernel,
+    provider,
+    request_scope,
+)
+from xtr_dependency_injection.integration.wireup import engine_container
+from xtr_dependency_injection.runtime.wireup_container import WireupContainer
+
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Hashable
-    from typing import Literal
+    from starlette.applications import Starlette
 
-__all__ = ["provider"]
+    from xtr_dependency_injection.kernel.compiled_kernel import CompiledKernel
 
-_NO_KERNEL: Final = (
-    "this route asks the container for a dependency, but no kernel serves "
-    "this application: call xtr_http_kernel.setup(app, kernel)"
+__all__ = ["attach", "detach", "provider", "request_scope"]
+
+_ALREADY_ATTACHED: Final = (
+    "a kernel already serves this application: detach(app) before attaching another"
 )
 
-_PROVIDERS: Final[dict[tuple[str, object, object], Callable[[], Awaitable[object]]]] = {}
 
+def attach(app: Starlette, compiled: CompiledKernel) -> None:
+    """Serve ``app`` from ``compiled``'s container.
 
-def provider(
-    kind: Literal["service", "param", "env"],
-    key: object,
-    qualifier: Hashable | None = None,
-) -> Callable[[], Awaitable[object]]:
-    """Return the resolver for one injection — the same one every time.
+    Args:
+        app: The application to serve.
+        compiled: The kernel whose container the resolvers read.
 
-    One callable per ``(kind, key, qualifier)``: the framework tells route
-    dependencies apart by the callable it was handed, and two equal markers
-    must carry the same resolver to stay equal and hashable.
+    Raises:
+        FastapiIntegrationError: If a kernel is already attached; call
+            :func:`detach` first to swap it.
     """
-    cache_key = (kind, key, qualifier)
-    cached = _PROVIDERS.get(cache_key)
-    if cached is not None:
-        return cached
+    if attached_kernel(app) is not None:
+        raise FastapiIntegrationError(_ALREADY_ATTACHED)
+    engine = engine_container(compiled)
+    # The kernel's public container is typed by the contract interface;
+    # wrapping the same engine gives the resolvers the parameter and
+    # environment access the contract does not carry.
+    setattr(app.state, STATE_KEY, AttachedKernel(WireupContainer(engine), engine))
 
-    async def resolve() -> object:
-        raise RuntimeError(_NO_KERNEL)
 
-    label = key.__qualname__ if isinstance(key, type) else str(key)
-    resolve.__name__ = f"xtr_{kind}[{label}]"
-    resolve.__qualname__ = resolve.__name__
-    # ``set_dependency`` tells an already-derived resolver apart by this flag.
-    resolve.__dict__["__xtr_provider__"] = True
-    # ``setdefault`` keeps one canonical resolver even if two threads raced here.
-    return _PROVIDERS.setdefault(cache_key, resolve)
+def detach(app: Starlette) -> None:
+    """Stop serving ``app``; a no-op when no kernel is attached."""
+    if attached_kernel(app) is not None:
+        delattr(app.state, STATE_KEY)

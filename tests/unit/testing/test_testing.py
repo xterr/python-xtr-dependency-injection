@@ -9,7 +9,7 @@ from typing_extensions import override
 from tests.fixtures.app_kernel.services import Greeter
 from tests.support.bundles import EVENTS, ChorusBundle, Echo, EchoBundle, EchoConfig
 from xtr_dependency_injection import Bundle, Kernel, as_bundle
-from xtr_dependency_injection.testing import assert_zero_config, boot_for_test
+from xtr_dependency_injection.testing import apply_overrides, assert_zero_config, boot_for_test
 
 if TYPE_CHECKING:
     from xtr_dependency_injection.builder.container_builder import ContainerBuilder
@@ -75,6 +75,17 @@ async def test_a_qualified_override_uses_a_tuple_key() -> None:
 
     async with await boot_for_test(_kernel(), overrides={(Echo, None): fake}) as booted:
         assert await booted.container.get(Echo) is fake
+
+
+async def test_apply_overrides_then_boot_sees_the_override() -> None:
+    compiled = _kernel().with_env("test").build()
+
+    apply_overrides(compiled, {Echo: FakeEcho(EchoConfig())})
+
+    async with await compiled.boot() as booted:
+        greeter = await booted.container.get(Greeter)
+
+    assert greeter.greet() == "fake!"
 
 
 async def test_a_zero_config_bundle_passes() -> None:

@@ -16,6 +16,7 @@ from xtr_dependency_injection.exception import (
     DependencyInjectionError,
     DuplicateBundleError,
     DuplicateServiceError,
+    FastapiIntegrationError,
     InvalidDefinitionError,
     InvalidEnvironmentError,
     InvalidEnvironmentVariableError,
@@ -191,6 +192,14 @@ def test_builder_frozen_error_names_the_operation() -> None:
 
     assert error.operation == "factory"
     assert str(error) == "factory() cannot be called: the container is already compiled"
+
+
+def test_fastapi_integration_error_carries_the_reason() -> None:
+    reason = "no kernel serves this application"
+    error = FastapiIntegrationError(reason)
+
+    assert error.reason == reason
+    assert str(error) == reason
 
 
 def test_kernel_already_booted_error_says_to_build_again() -> None:

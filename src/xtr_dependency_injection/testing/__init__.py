@@ -12,10 +12,28 @@ if TYPE_CHECKING:
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
     from xtr_dependency_injection.kernel.booted_kernel import BootedKernel
+    from xtr_dependency_injection.kernel.compiled_kernel import CompiledKernel
 
-__all__ = ["assert_zero_config", "boot_for_test"]
+__all__ = ["apply_overrides", "assert_zero_config", "boot_for_test"]
 
 _NO_OVERRIDES: Final[Mapping[type | tuple[type, Hashable], object]] = MappingProxyType({})
+
+
+def apply_overrides(
+    compiled: CompiledKernel,
+    overrides: Mapping[type | tuple[type, Hashable], object],
+    /,
+) -> None:
+    """Install ``overrides`` on ``compiled`` before it boots.
+
+    A key is a type, or a ``(type, qualifier)`` pair for a qualified
+    service. Apply them before booting, so every boot hook already sees the
+    replacements — :func:`boot_for_test` does exactly that.
+    """
+    engine = compiled._engine  # noqa: SLF001 — testing helper unwraps the kernel-owned engine.  # pyright: ignore[reportPrivateUsage]
+    for key, replacement in overrides.items():
+        provided, qualifier = key if isinstance(key, tuple) else (key, None)
+        engine.override.set(provided, replacement, qualifier=qualifier)
 
 
 async def boot_for_test(
@@ -34,10 +52,7 @@ async def boot_for_test(
             ...
     """
     compiled = kernel.with_env(env).build()
-    engine = compiled._engine  # noqa: SLF001 — testing helper unwraps the kernel-owned engine.  # pyright: ignore[reportPrivateUsage]
-    for key, replacement in overrides.items():
-        provided, qualifier = key if isinstance(key, tuple) else (key, None)
-        engine.override.set(provided, replacement, qualifier=qualifier)
+    apply_overrides(compiled, overrides)
     return await compiled.boot()
 
 
