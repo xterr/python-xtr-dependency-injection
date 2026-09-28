@@ -17,14 +17,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Any, cast, get_args, get_origin
 
 import wireup
-from wireup.errors import FactoryReturnTypeIsEmptyError
 from wireup.ioc.registry import _function_get_unwrapped_return_type
 from wireup.ioc.type_analysis import analyze_type
 
 from xtr_dependency_injection.config.env_placeholder import env_parameter
 from xtr_dependency_injection.decorator.autowire import Autowire
 from xtr_dependency_injection.decorator.target import Target
-from xtr_dependency_injection.exception import InvalidArgumentError
+from xtr_dependency_injection.exception import InvalidArgumentError, InvalidArgumentTypeError
 
 if TYPE_CHECKING:
     import inspect
@@ -78,12 +77,14 @@ def key_type(provider: Callable[..., object] | type) -> type:
     optional return stays ``T | None``.
 
     Raises:
-        FactoryReturnTypeIsEmptyError: If ``provider`` is a function without a
+        InvalidArgumentTypeError: If ``provider`` is a function without a
             return annotation.
     """
     implementation = cast("object | None", _function_get_unwrapped_return_type(provider))
     if implementation is None:
-        raise FactoryReturnTypeIsEmptyError(provider)
+        name = getattr(provider, "__qualname__", repr(provider))
+        reason = f"factory {name} must annotate its return type: that is the service it provides"
+        raise InvalidArgumentTypeError(reason)
     return analyze_type(implementation).normalized_type
 
 
@@ -212,7 +213,7 @@ def built_type(definition: Definition) -> type | None:
         return type(provider)
     try:
         key = key_type(cast("Callable[..., object]", provider))
-    except FactoryReturnTypeIsEmptyError:
+    except InvalidArgumentTypeError:
         return None
     origin = get_origin(key)
     if isinstance(origin, type):

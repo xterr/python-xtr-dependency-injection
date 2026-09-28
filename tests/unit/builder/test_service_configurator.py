@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections.abc import Iterator  # noqa: TC003
 
 import pytest
-from wireup.errors import FactoryReturnTypeIsEmptyError
 
 from xtr_dependency_injection.builder import Origin
 from xtr_dependency_injection.builder.service_configurator import (
@@ -16,6 +15,7 @@ from xtr_dependency_injection.exception import (
     BuilderFrozenError,
     BuilderPhaseError,
     DependencyInjectionError,
+    InvalidArgumentTypeError,
 )
 
 
@@ -78,7 +78,7 @@ def test_a_generator_factory_is_keyed_by_its_yield_type() -> None:
 
 
 def test_a_factory_without_a_return_type_is_refused() -> None:
-    with pytest.raises(FactoryReturnTypeIsEmptyError):
+    with pytest.raises(InvalidArgumentTypeError, match="must annotate its return type"):
         _ = _services().set(untyped)
 
 

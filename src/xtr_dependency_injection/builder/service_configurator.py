@@ -193,7 +193,9 @@ class ServiceConfigurator:
         evaluated return type. Same key + same provider is a no-op.
 
         Raises:
-            TypeError: If ``target`` is not a class or a plain function.
+            InvalidArgumentTypeError: If ``target`` is not a class or a plain
+                function, or is a function that does not annotate its return
+                type.
         """
         self._allow("set", "load", "process")
         if isinstance(target, type):
