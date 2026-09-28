@@ -20,6 +20,7 @@ from xtr_dependency_injection.decorator.autowire import (
     is_container_supplied,
 )
 from xtr_dependency_injection.decorator.target import Target
+from xtr_dependency_injection.exception import InvalidArgumentError
 
 try:
     from fastapi.params import Depends as FrameworkDependency
@@ -138,6 +139,11 @@ def test_autowire_is_a_hashable_frozen_dataclass() -> None:
     assert Autowire() == Autowire()
     assert Autowire(param="x") == Autowire(param="x")
     _ = {Autowire(), Autowire(env="PORT")}
+
+
+def test_naming_both_a_parameter_and_a_variable_is_refused() -> None:
+    with pytest.raises(InvalidArgumentError):
+        _ = Autowire(param="kernel.name", env="PORT")
 
 
 def test_autowire_beside_target_becomes_one_qualified_injection() -> None:

@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Annotated, TypeVar, cast, get_args, get_origin
 
 from xtr_dependency_injection.exception import InvalidArgumentError
 
+from ._dependency_base import DependencyBase, set_dependency
 from .target import Target
 
 if TYPE_CHECKING:
@@ -40,8 +41,8 @@ if TYPE_CHECKING:
 __all__ = ["Autowire", "Injected", "is_container_supplied"]
 
 
-@dataclass(frozen=True, slots=True)
-class Autowire:
+@dataclass(frozen=True, slots=True, init=False)
+class Autowire(DependencyBase):
     """Mark a parameter as container-provided — by type, by parameter, or from the environment.
 
     Without :attr:`param` or :attr:`env`, the parameter is resolved by its
@@ -50,6 +51,11 @@ class Autowire:
     placeholder in it resolved. With :attr:`env`, the environment variable
     expression (``"int:PORT"``, ``"json:file:SECRETS"``) is read when the
     service is built, through the container's processors.
+
+    When the web framework is installed the marker is also one of its
+    dependency declarations, so the same annotation resolves through the
+    container inside a route; ``**fastapi`` exists for the framework's own
+    copy of a marker and is never written by hand.
 
     Attributes:
         param: A dotted parameter name to inject.
@@ -62,11 +68,19 @@ class Autowire:
     param: str | None = None
     env: str | None = None
 
-    def __post_init__(self) -> None:
-        """Refuse naming both a parameter and an environment variable."""
-        if self.param is not None and self.env is not None:
+    def __init__(
+        self,
+        param: str | None = None,
+        env: str | None = None,
+        **fastapi: object,
+    ) -> None:
+        """Record what to inject; refuse naming both a parameter and a variable."""
+        if param is not None and env is not None:
             msg = "Autowire takes param= or env=, not both"
             raise InvalidArgumentError(msg)
+        object.__setattr__(self, "param", param)
+        object.__setattr__(self, "env", env)
+        set_dependency(self, fastapi, param=param, env=env)
 
 
 T = TypeVar("T")
