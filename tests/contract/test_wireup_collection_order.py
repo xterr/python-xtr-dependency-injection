@@ -7,7 +7,7 @@ from collections.abc import Hashable, Mapping, Sequence
 import pytest
 import wireup
 
-from xtr_dependency_injection.compiler.registration import _clone_function
+from xtr_dependency_injection.compiler._registration import clone_function
 
 pytestmark = pytest.mark.anyio
 
@@ -37,7 +37,7 @@ def _injectables() -> dict[str, object]:
     return {
         "declared": DeclaredPlugin,
         "factory": wireup.injectable(
-            _clone_function(factory_plugin), as_type=Plugin, qualifier="factory"
+            clone_function(factory_plugin), as_type=Plugin, qualifier="factory"
         ),
         "instance": wireup.instance(InstancePlugin(), as_type=Plugin, qualifier="instance"),
     }

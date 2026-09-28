@@ -22,17 +22,17 @@ from xtr_dependency_injection.config.env_placeholder import env_placeholders_in
 from xtr_dependency_injection.exception import ContainerCompilationError
 from xtr_dependency_injection.exception._naming import key_name, qualified_name
 
+from ._registration import (
+    box_type,
+    clone_function,
+    decorating_factory,
+    env_resolving_factory,
+    map_result,
+    resolving_instance_factory,
+    synthesize_class_factory,
+)
 from ._wireup_bridge import key_type
 from .before_after_sorter import sort_with_priorities
-from .registration import (
-    _box_type,
-    _clone_function,
-    _decorating_factory,
-    _env_resolving_factory,
-    _map_result,
-    _resolving_instance_factory,
-    _synthesize_class_factory,
-)
 from .resettable_service_pass import RESET_TAG, not_weak_referenceable
 
 if TYPE_CHECKING:
@@ -210,16 +210,16 @@ def _emit(
     )
     if hook is not None:
         tracked = _tracking(track, hook, definition)
-        factory = _map_result(factory, tracked, provides=implementation)
+        factory = map_result(factory, tracked, provides=implementation)
     emitted: list[object] = []
     for decoration in decorations:
-        box = _box_type(next(boxes))
-        boxed = _map_result(factory, box, provides=box)
+        box = box_type(next(boxes))
+        boxed = map_result(factory, box, provides=box)
         emitted.append(wireup.injectable(boxed, lifetime=lifetime))
         decorator, implementation = _factory_for(
             decoration.decorator, instance=False, arguments=decoration.arguments
         )
-        factory = _decorating_factory(
+        factory = decorating_factory(
             decorator, decoration.inner_parameter, box, provides=implementation
         )
     emitted.append(
@@ -261,7 +261,7 @@ def _factory_for(
     """Return a factory for ``provider``, and the type it produces.
 
     For an instance we lean on ``wireup.instance``: the returned factory is a
-    marked function, but ``_map_result`` / ``_decorating_factory`` wrap it
+    marked function, but ``map_result`` / ``decorating_factory`` wrap it
     into an unmarked clone, and the outer ``wireup.injectable`` call re-marks
     that clone with the definition's key. So the marker never surfaces. An
     instance holding environment placeholders gets a factory resolving them
@@ -271,18 +271,16 @@ def _factory_for(
     if instance:
         implementation = type(provider)
         if env_placeholders_in(provider):
-            return _resolving_instance_factory(provider), implementation
+            return resolving_instance_factory(provider), implementation
         return wireup.instance(provider, as_type=implementation), implementation
     if isinstance(provider, type):
-        factory = _synthesize_class_factory(provider)
-        resolving = _env_resolving_factory(
-            provider, factory, provides=provider, arguments=arguments
-        )
+        factory = synthesize_class_factory(provider)
+        resolving = env_resolving_factory(provider, factory, provides=provider, arguments=arguments)
         return resolving, provider
     function = cast("Callable[..., object]", provider)
     implementation = key_type(function)
-    factory = _env_resolving_factory(
-        function, _clone_function(function), provides=implementation, arguments=arguments
+    factory = env_resolving_factory(
+        function, clone_function(function), provides=implementation, arguments=arguments
     )
     return factory, implementation
 

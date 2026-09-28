@@ -1,4 +1,4 @@
-"""S6: ``_map_result`` maps each built value once, lazily, keeping cleanup."""
+"""S6: ``map_result`` maps each built value once, lazily, keeping cleanup."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Literal
 import pytest
 import wireup
 
-from xtr_dependency_injection.compiler.registration import _clone_function, _map_result
+from xtr_dependency_injection.compiler._registration import clone_function, map_result
 
 pytestmark = pytest.mark.anyio
 
@@ -72,7 +72,7 @@ def _counting(seen: list[Resource]) -> Callable[[Resource], Resource]:
 def _mapped(
     factory: Callable[..., object], seen: list[Resource], lifetime: Lifetime = "singleton"
 ) -> Callable[..., object]:
-    mapped = _map_result(_clone_function(factory), _counting(seen), provides=Resource)
+    mapped = map_result(clone_function(factory), _counting(seen), provides=Resource)
     return wireup.injectable(mapped, lifetime=lifetime)
 
 
@@ -144,7 +144,7 @@ async def test_a_scope_error_is_thrown_into_the_inner_generator(
 
 
 def test_the_mapped_factory_is_named_like_the_original() -> None:
-    mapped = _map_result(sync_resource, _counting([]), provides=Resource)
+    mapped = map_result(sync_resource, _counting([]), provides=Resource)
 
     assert isinstance(mapped, FunctionType)
     assert mapped.__qualname__ == sync_resource.__qualname__

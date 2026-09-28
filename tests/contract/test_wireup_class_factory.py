@@ -10,7 +10,7 @@ import pytest
 import wireup
 from wireup import Inject
 
-from xtr_dependency_injection.compiler.registration import _synthesize_class_factory
+from xtr_dependency_injection.compiler._registration import synthesize_class_factory
 
 pytestmark = pytest.mark.anyio
 
@@ -72,7 +72,7 @@ def _container(*classes: type, config: dict[str, object] | None = None) -> wireu
     return wireup.create_async_container(
         injectables=[
             wireup.instance(Dependency(), as_type=Dependency),
-            *(wireup.injectable(_synthesize_class_factory(cls)) for cls in classes),
+            *(wireup.injectable(synthesize_class_factory(cls)) for cls in classes),
         ],
         config=config,
     )
@@ -98,7 +98,7 @@ async def test_qualifier_and_config_annotations_are_honoured() -> None:
     container = wireup.create_async_container(
         injectables=[
             wireup.instance(primary, as_type=Dependency, qualifier="primary"),
-            wireup.injectable(_synthesize_class_factory(Qualified)),
+            wireup.injectable(synthesize_class_factory(Qualified)),
         ],
         config={"db": {"url": "sqlite://"}},
     )
@@ -141,7 +141,7 @@ async def test_a_constructor_inherited_from_a_generic_base_is_resolved() -> None
 
 
 def test_the_factory_is_named_like_the_class() -> None:
-    factory = _synthesize_class_factory(Deferred)
+    factory = synthesize_class_factory(Deferred)
 
     assert isinstance(factory, FunctionType)
     assert factory.__qualname__ == Deferred.__qualname__

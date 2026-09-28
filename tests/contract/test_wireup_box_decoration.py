@@ -9,11 +9,11 @@ import pytest
 import wireup
 from typing_extensions import override
 
-from xtr_dependency_injection.compiler.registration import (
-    _box_type,
-    _decorating_factory,
-    _map_result,
-    _synthesize_class_factory,
+from xtr_dependency_injection.compiler._registration import (
+    box_type,
+    decorating_factory,
+    map_result,
+    synthesize_class_factory,
 )
 
 pytestmark = pytest.mark.anyio
@@ -62,23 +62,23 @@ def plain_resource() -> Iterator[Plain]:
 
 
 def _boxed(factory: Callable[..., object], box: type, lifetime: Lifetime) -> object:
-    return wireup.injectable(_map_result(factory, box, provides=box), lifetime=lifetime)
+    return wireup.injectable(map_result(factory, box, provides=box), lifetime=lifetime)
 
 
 def _decorator(
     decorator: type, box: type, lifetime: Lifetime, qualifier: str | None = None
 ) -> object:
-    factory = _decorating_factory(
-        _synthesize_class_factory(decorator), "inner", box, provides=decorator
+    factory = decorating_factory(
+        synthesize_class_factory(decorator), "inner", box, provides=decorator
     )
     return wireup.injectable(factory, as_type=Greeter, lifetime=lifetime, qualifier=qualifier)
 
 
 def _decorated(lifetime: Lifetime) -> wireup.AsyncContainer:
-    box = _box_type(1)
+    box = box_type(1)
     return wireup.create_async_container(
         injectables=[
-            _boxed(_synthesize_class_factory(Plain), box, lifetime),
+            _boxed(synthesize_class_factory(Plain), box, lifetime),
             _decorator(Loud, box, lifetime),
         ]
     )
@@ -122,7 +122,7 @@ async def test_a_transient_decoration_is_built_every_time() -> None:
 
 
 async def test_the_inner_generator_is_cleaned_up_on_close() -> None:
-    box = _box_type(1)
+    box = box_type(1)
     container = wireup.create_async_container(
         injectables=[_boxed(plain_resource, box, "singleton"), _decorator(Loud, box, "singleton")]
     )
@@ -137,11 +137,11 @@ async def test_the_inner_generator_is_cleaned_up_on_close() -> None:
 
 
 async def test_the_inner_is_absent_from_the_collection() -> None:
-    box = _box_type(1)
+    box = box_type(1)
     container = wireup.create_async_container(
         injectables=[
             wireup.instance(Other(), as_type=Greeter, qualifier="other"),
-            _boxed(_synthesize_class_factory(Plain), box, "singleton"),
+            _boxed(synthesize_class_factory(Plain), box, "singleton"),
             _decorator(Loud, box, "singleton", qualifier="main"),
         ]
     )
@@ -152,12 +152,12 @@ async def test_the_inner_is_absent_from_the_collection() -> None:
 
 
 async def test_stacked_decorators_wrap_in_order() -> None:
-    first_box = _box_type(1)
-    second_box = _box_type(2)
-    loud = _decorating_factory(_synthesize_class_factory(Loud), "inner", first_box, provides=Loud)
+    first_box = box_type(1)
+    second_box = box_type(2)
+    loud = decorating_factory(synthesize_class_factory(Loud), "inner", first_box, provides=Loud)
     container = wireup.create_async_container(
         injectables=[
-            _boxed(_synthesize_class_factory(Plain), first_box, "singleton"),
+            _boxed(synthesize_class_factory(Plain), first_box, "singleton"),
             _boxed(loud, second_box, "singleton"),
             _decorator(Exclaiming, second_box, "singleton"),
         ]
@@ -169,8 +169,8 @@ async def test_stacked_decorators_wrap_in_order() -> None:
 
 
 def test_box_types_are_distinct_and_private() -> None:
-    first = _box_type(1)
-    second = _box_type(1)
+    first = box_type(1)
+    second = box_type(1)
 
     assert first is not second
     assert first.__module__ == "xtr_dependency_injection.compiler"

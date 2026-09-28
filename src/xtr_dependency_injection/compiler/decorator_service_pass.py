@@ -21,10 +21,10 @@ from xtr_dependency_injection.exception import (
 )
 from xtr_dependency_injection.exception._naming import key_name, qualified_name
 
+from ._registration import null_decorator_factory
 from ._state import state_of
 from .check_definition_validity_pass import invalid_arguments
 from .priority_tagged_service import by_priority
-from .registration import _null_decorator_factory
 from .wireup_compiler import Decoration
 
 if TYPE_CHECKING:
@@ -113,7 +113,7 @@ def _null_decorator(
     target_type, _ = decorates.key
     null = Definition(
         key=decorates.key,
-        provider=_null_decorator_factory(decorator, parameter.name, target_type),
+        provider=null_decorator_factory(decorator, parameter.name, target_type),
         kind="factory",
         lifetime="singleton",
         origin=Origin(

@@ -32,15 +32,15 @@ if TYPE_CHECKING:
     from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 __all__ = [
-    "_alias_factory",
-    "_box_type",
-    "_clone_function",
-    "_decorating_factory",
-    "_env_resolving_factory",
-    "_map_result",
-    "_null_decorator_factory",
-    "_resolving_instance_factory",
-    "_synthesize_class_factory",
+    "alias_factory",
+    "box_type",
+    "clone_function",
+    "decorating_factory",
+    "env_resolving_factory",
+    "map_result",
+    "null_decorator_factory",
+    "resolving_instance_factory",
+    "synthesize_class_factory",
 ]
 
 _BOX_MODULE: Final = "xtr_dependency_injection.compiler"
@@ -51,7 +51,7 @@ _Call: TypeAlias = "tuple[Callable[..., object], dict[str, object]]"
 """What to call, and with which arguments."""
 
 
-def _clone_function(fn: Callable[..., object]) -> types.FunctionType:
+def clone_function(fn: Callable[..., object]) -> types.FunctionType:
     """Return a copy of ``fn`` that can be marked without marking ``fn``.
 
     Built from the same code object, so a coroutine, generator or async
@@ -82,7 +82,7 @@ def _clone_function(fn: Callable[..., object]) -> types.FunctionType:
     return clone
 
 
-def _synthesize_class_factory(cls: type) -> Callable[..., object]:
+def synthesize_class_factory(cls: type) -> Callable[..., object]:
     """Return a factory building ``cls``, registered under ``cls`` itself.
 
     It presents the constructor's signature, so wireup injects exactly what
@@ -104,7 +104,7 @@ def _synthesize_class_factory(cls: type) -> Callable[..., object]:
     return build
 
 
-def _alias_factory(
+def alias_factory(
     alias_type: type,
     target_type: type,
     target_qualifier: object | None,
@@ -137,7 +137,7 @@ def _alias_factory(
     return forward
 
 
-def _map_result(
+def map_result(
     factory: Callable[..., object],
     fn: Callable[[Any], object],
     /,
@@ -160,7 +160,7 @@ def _map_result(
     return _wrap(factory, evaluated_signature(factory), provides, _unchanged, fn)
 
 
-def _box_type(index: int) -> type:
+def box_type(index: int) -> type:
     """Return a fresh, private box type for the ``index``-th decoration.
 
     A decorated service is registered under its box instead of its own type,
@@ -182,7 +182,7 @@ def _box_type(index: int) -> type:
     return box
 
 
-def _null_decorator_factory(
+def null_decorator_factory(
     decorator: Callable[..., object] | type,
     inner_parameter: str,
     provides: type,
@@ -197,11 +197,11 @@ def _null_decorator_factory(
     ``Autowire(param=/env=)`` parameters are resolved like any factory's; its
     definition's arguments stay on the definition that registers it.
     """
-    base_factory = _env_resolving_factory(
+    base_factory = env_resolving_factory(
         decorator,
-        _synthesize_class_factory(decorator)
+        synthesize_class_factory(decorator)
         if isinstance(decorator, type)
-        else _clone_function(decorator),
+        else clone_function(decorator),
         provides=provides,
     )
     signature = evaluated_signature(base_factory)
@@ -219,7 +219,7 @@ def _null_decorator_factory(
     )
 
 
-def _decorating_factory(
+def decorating_factory(
     factory: Callable[..., object],
     inner_parameter: str,
     box: type,
@@ -256,7 +256,7 @@ def _decorating_factory(
     return _wrap(factory, signature.replace(parameters=parameters), provides, unbox, _identity)
 
 
-def _env_resolving_factory(
+def env_resolving_factory(
     provider: Callable[..., object] | type,
     factory: Callable[..., object],
     /,
@@ -427,7 +427,7 @@ def _resolving_generator(
     return delegating
 
 
-def _resolving_instance_factory(instance: object) -> Callable[..., object]:
+def resolving_instance_factory(instance: object) -> Callable[..., object]:
     """Return a factory producing ``instance`` with its environment placeholders resolved."""
     provides = type(instance)
     parameter = inspect.Parameter(

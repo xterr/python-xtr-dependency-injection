@@ -8,7 +8,7 @@ on wireup's internals lives here, so a wireup release that moves them breaks
 this one module.
 
 ``REGISTRATION_ATTRIBUTE`` names the dunder ``@injectable`` writes on what it
-decorates; the bridge exports the name so ``_clone_function`` can strip it
+decorates; the bridge exports the name so ``clone_function`` can strip it
 when copying a factory, keeping the mark out of the clone.
 """
 

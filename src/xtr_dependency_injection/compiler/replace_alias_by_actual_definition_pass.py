@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, final
 from xtr_dependency_injection.builder.definition import Definition, Origin
 from xtr_dependency_injection.exception import UnknownServiceError
 
+from ._registration import alias_factory
 from ._state import state_of
-from .registration import _alias_factory
 
 if TYPE_CHECKING:
     from xtr_dependency_injection.builder.container_builder import ContainerBuilder
@@ -57,7 +57,7 @@ class ReplaceAliasByActualDefinitionPass:
             _ = builder.set_definition(
                 Definition(
                     key=alias_key,
-                    provider=_alias_factory(alias_type, target_type, target_qualifier),
+                    provider=alias_factory(alias_type, target_type, target_qualifier),
                     kind="factory",
                     lifetime=target.lifetime,
                     origin=Origin(target.origin.kind, target.origin.name, "alias"),
