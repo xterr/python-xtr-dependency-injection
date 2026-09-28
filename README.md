@@ -53,6 +53,13 @@ Libraries depend on it through an extra, so using them without a container costs
 di = ["xtr-dependency-injection>=1.0,<2"]
 ```
 
+Serving an application over HTTP takes the `fastapi` extra, which pulls in the web framework
+so the injection markers double as its dependency declarations (see [FastAPI](#fastapi)):
+
+```sh
+uv add "xtr-dependency-injection[fastapi]"
+```
+
 ## The golden path
 
 An application once the xtr libraries ship their bundles. Root bundles are listed in
@@ -123,18 +130,20 @@ async def warm_cache(cache: Injected[Cache]) -> None: ...
 That is the whole application. Other entry points use the same kernel:
 
 ```python
-# FastAPI: the container must exist before the app is wired; boot hooks run in the lifespan
-import wireup.integration.fastapi
-from xtr_dependency_injection.integration.wireup import engine_container
+# HTTP: one call serves the app from the kernel — see the FastAPI section below
+from xtr_http_kernel import setup
 
-compiled = kernel.build()
-app = FastAPI(lifespan=compiled.lifespan)
-wireup.integration.fastapi.setup(engine_container(compiled), app)
+app = FastAPI()
+setup(app, kernel)  # attaches the container and runs boot hooks in the app's lifespan
 
 # a script or a worker
 async with await kernel.boot() as booted:
     invoices = await booted.container.get(InvoiceRepository)
 ```
+
+The web entry point lives in [xtr-http-kernel](../xtr-http-kernel); this package only carries
+the markers and the seam it builds on. See [FastAPI](#fastapi) for what the markers do in a
+route.
 
 `build()` compiles; `boot()` also runs every bundle's `boot()` and the application's
 `@on_boot` hooks; `run(main)` boots, calls `main` with its `Injected[...]` parameters filled,
@@ -862,6 +871,71 @@ collected through `@as_alias(Base, qualifier=...)` come out of `Sequence[Base]` 
 `Mapping[Hashable, Base]` in the order their classes were given, whatever order the aliases
 were declared in.
 
+## FastAPI
+
+Install the `fastapi` extra to serve an application over HTTP, and
+[xtr-http-kernel](../xtr-http-kernel) for the entry point that wires it:
+
+```sh
+uv add "xtr-dependency-injection[fastapi]" xtr-http-kernel
+```
+
+With the framework installed, the same markers this package already uses in a constructor
+also work in a route. `Injected[T]`, `Annotated[T, Autowire(param=...)]`,
+`Annotated[T, Autowire(env=...)]` and `Annotated[T, Target("name")]` each stand for a
+FastAPI dependency, so the framework resolves them through the container while it fills the
+rest of the signature the way it always does:
+
+```python
+from typing import Annotated
+
+from fastapi import FastAPI
+from xtr_dependency_injection import Autowire, Injected, Target
+from xtr_http_kernel import setup
+
+from app.kernel import kernel
+
+app = FastAPI()
+setup(app, kernel)
+
+
+@app.get("/invoices/{invoice_id}")
+async def read_invoice(
+    invoice_id: int,  # a path parameter, filled by FastAPI
+    repo: Injected[InvoiceRepository],  # resolved from the container
+    env: Annotated[str, Autowire(param="kernel.environment")],
+    mailer: Annotated[Mailer, Target("smtp")],
+) -> Invoice:
+    return await repo.get(invoice_id)
+```
+
+The markers carry only what the container needs, so the OpenAPI schema and the endpoint's
+documented parameters stay the HTTP ones — `invoice_id` here — and the injected services never
+appear. Plain `Depends` is untouched and stays the default for everything else: a request-body
+model, a security scheme, a dependency written as a function. Reach for a marker only to pull a
+container service into a route; reach for `Depends` for everything FastAPI already does.
+
+`xtr_http_kernel.setup(app, kernel)` is the one call an application makes — it attaches the
+kernel and runs the boot hooks inside the app's lifespan. The seam it builds on lives here, in
+`xtr_dependency_injection.integration.fastapi`, and an application never calls it directly:
+
+- `attach(app, compiled)` stores a compiled kernel's container on the application so the route
+  resolvers can read it; `detach(app)` removes it, and attaching a second kernel without
+  detaching the first is a `FastapiIntegrationError`.
+- `request_scope(app)` opens the container scope a request's scoped services live in, for the
+  span of that request.
+- `provider(...)` derives the resolver a marker turns into.
+
+These exist for an entry point such as xtr-http-kernel to build on; an application uses
+`setup` and the markers, nothing lower.
+
+A scoped service built for a request is released after the response is sent — FastAPI's own
+timing for a dependency's cleanup — so a service that opens a unit of work per request commits
+or rolls back once the response has gone out.
+
+A marker that resolves before a kernel is attached, or outside an open request scope, raises
+`FastapiIntegrationError` naming what is missing, rather than failing deep in the engine.
+
 ## Testing
 
 ```python
@@ -886,6 +960,25 @@ def xtr_kernel() -> Kernel:
 
 The plugin requires anyio's pytest plugin and `@pytest.mark.anyio` on async tests;
 pytest-asyncio strict mode is unsupported.
+
+To swap services in a served application, override before it boots. `apply_overrides(compiled,
+overrides)` installs replacements on a compiled kernel — the same keys `boot_for_test` takes, a
+`Type` or a `(Type, qualifier)` pair — so every boot hook, and every route that resolves later,
+sees the fakes. Attach the kernel to the app after overriding:
+
+```python
+import httpx
+from xtr_dependency_injection.testing import apply_overrides
+from xtr_dependency_injection.integration.fastapi import attach
+
+compiled = kernel.with_env("test").build()
+apply_overrides(compiled, {Mailer: FakeMailer()})
+attach(app, compiled)
+
+transport = httpx.ASGITransport(app)
+async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    response = await client.get("/invoices/1")
+```
 
 ## Diagnostics
 
@@ -926,8 +1019,11 @@ module. It exports three helpers:
   the caller's `parameters`, and what `Autowire(env=...)` reads — into a
   `wireup.AsyncContainer`;
 - `engine_container(kernel)`, which unwraps a compiled or booted kernel down to its
-  `wireup.AsyncContainer` for framework integrations such as
-  `wireup.integration.fastapi.setup(engine_container(compiled), app)`.
+  `wireup.AsyncContainer` for a caller that drives the engine directly.
+
+To serve an application over HTTP, use [FastAPI](#fastapi) and
+`xtr_http_kernel.setup(app, kernel)` — not the engine container. This module is for a caller
+building its own container by hand, not for wiring a route.
 
 Bundle *classes* are listed (not instances); every listed class is active (`{"all": True}`
 semantics), and required peers are pulled in recursively. Boot hooks do not run.
@@ -1029,6 +1125,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `BuilderPhaseError` / `BuilderFrozenError` | A builder operation in the wrong phase / after compilation |
 | `KernelAlreadyBootedError` | A compiled kernel booted twice |
 | `UnknownLocatorKeyError` | `ServiceLocator.get` with an unknown name (`LookupError`) |
+| `FastapiIntegrationError` | A route resolves with no kernel attached or no open request scope, or a second kernel is attached to an application one already serves |
 
 ## Known limitations
 
