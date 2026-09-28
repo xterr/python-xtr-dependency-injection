@@ -27,6 +27,7 @@ from xtr_dependency_injection.config.env_placeholder import EnvPlaceholder
 from xtr_dependency_injection.exception import (
     InvalidParameterTypeError,
     ParameterCircularReferenceError,
+    ParameterConflictError,
     ParameterNotFoundError,
 )
 
@@ -184,12 +185,23 @@ class ParameterBag(ParameterBagInterface):
         return self._resolve(value, (*resolving, name))
 
     def _holder(self, parents: list[str], *, create: bool) -> MutableMapping[str, object] | None:
+        """Return the mapping holding the leaf under ``parents``, making the missing ones.
+
+        Raises:
+            ParameterConflictError: When creating, and a parent holds a value:
+                a value cannot gain children.
+        """
         holder: MutableMapping[str, object] = self._parameters
-        for part in parents:
+        for depth, part in enumerate(parents):
             child = holder.get(part)
             if not isinstance(child, dict):
                 if not create:
                     return None
+                if part in holder:
+                    path = tuple(parents[: depth + 1])
+                    raise ParameterConflictError(
+                        path, "a value", f"a value under {'.'.join(parents)!r}"
+                    )
                 child = {}
                 holder[part] = child
             holder = cast("MutableMapping[str, object]", child)
@@ -199,14 +211,23 @@ class ParameterBag(ParameterBagInterface):
 def _merge(into: dict[str, object], values: Mapping[str, object]) -> None:
     for key, value in values.items():
         existing = into.get(key)
-        if isinstance(value, Mapping) and isinstance(existing, dict):
+        if isinstance(existing, dict) and isinstance(value, Mapping):
             _merge(cast("dict[str, object]", existing), cast("Mapping[str, object]", value))
-        elif isinstance(value, Mapping):
-            nested: dict[str, object] = {}
-            _merge(nested, cast("Mapping[str, object]", value))
-            into[key] = nested
         else:
-            into[key] = value
+            into[key] = _copied(value)
+
+
+def _copied(value: object) -> object:
+    """Return ``value`` with every mapping, list and set in it copied, the caller's left alone."""
+    if isinstance(value, Mapping):
+        nested: dict[str, object] = {}
+        _merge(nested, cast("Mapping[str, object]", value))
+        return nested
+    if isinstance(value, list):
+        return [_copied(item) for item in cast("list[object]", value)]
+    if isinstance(value, set):
+        return {*cast("set[object]", value)}
+    return value
 
 
 def _replace(leaf: object, old: str, new: str) -> object:

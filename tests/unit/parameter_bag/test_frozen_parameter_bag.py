@@ -20,3 +20,12 @@ def test_every_change_is_refused(operation: str) -> None:
 
     with pytest.raises(BuilderFrozenError, match=operation):
         getattr(bag, operation)(*arguments)
+
+
+def test_a_list_it_was_given_cannot_change_it_afterwards() -> None:
+    hosts = ["a"]
+    bag = FrozenParameterBag({"hosts": hosts})
+
+    hosts.append("b")
+
+    assert bag.get("hosts") == ["a"]

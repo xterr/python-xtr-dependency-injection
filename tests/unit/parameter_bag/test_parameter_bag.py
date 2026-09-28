@@ -5,6 +5,7 @@ import pytest
 from xtr_dependency_injection.exception import (
     InvalidParameterTypeError,
     ParameterCircularReferenceError,
+    ParameterConflictError,
     ParameterNotFoundError,
 )
 from xtr_dependency_injection.parameter_bag import ParameterBag, ParameterBagInterface
@@ -112,3 +113,22 @@ def test_resolve_replaces_every_parameter_once() -> None:
 def test_an_env_reference_needs_the_env_placeholder_bag() -> None:
     with pytest.raises(ParameterNotFoundError, match="env"):
         _ = _bag().resolve_string("%env(PORT)%")
+
+
+def test_a_value_cannot_gain_children() -> None:
+    bag = ParameterBag({"a": 1})
+
+    with pytest.raises(ParameterConflictError) as caught:
+        bag.set("a.b", 2)
+
+    assert caught.value.path == ("a",)
+    assert bag.get("a") == 1
+
+
+def test_a_list_given_to_the_bag_stays_the_callers() -> None:
+    hosts = ["a"]
+    bag = ParameterBag({"hosts": hosts, "nested": {"ports": [1]}})
+
+    hosts.append("b")
+
+    assert bag.get("hosts") == ["a"]
