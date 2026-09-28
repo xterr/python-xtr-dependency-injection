@@ -369,16 +369,6 @@ class ContainerBuilder:
         """
         return self._state.parameter_bag
 
-    def remove(self, service: type, /, *, qualifier: Hashable | None = None) -> None:
-        """Remove the service ``(service, qualifier)``.
-
-        Raises:
-            UnknownServiceError: If no such service is defined.
-        """
-        self._allow("remove", "process")
-        definition = self._require((service, qualifier), "remove")
-        self._state.store.remove(definition.key)
-
     def _require(self, key: ServiceKey, operation: str) -> Definition:
         definition = self._state.store.get(key)
         if definition is None:

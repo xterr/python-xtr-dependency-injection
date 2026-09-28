@@ -227,7 +227,7 @@ def test_set_definition_swaps_the_definition_and_records_the_override() -> None:
 def test_remove_forgets_the_service() -> None:
     _, builder = _builder()
 
-    builder.remove(Mailer)
+    builder.remove_definition(Mailer)
 
     assert not builder.has(Mailer)
 
@@ -274,18 +274,13 @@ def test_register_for_autoconfiguration_is_refused_after_load() -> None:
     assert caught.value.operation == "register_for_autoconfiguration"
 
 
-@pytest.mark.parametrize("operation", ["remove", "remove_definition"])
-def test_an_unknown_key_is_refused(operation: str) -> None:
+def test_an_unknown_key_is_refused() -> None:
     _, builder = _builder()
-    calls = {
-        "remove": lambda: builder.remove(Mailer, qualifier="x"),
-        "remove_definition": lambda: builder.remove_definition(Mailer, qualifier="x"),
-    }
 
     with pytest.raises(UnknownServiceError) as caught:
-        calls[operation]()
+        builder.remove_definition(Mailer, qualifier="x")
 
-    assert caught.value.operation == operation
+    assert caught.value.operation == "remove_definition"
 
 
 _ = Prepend  # touched to avoid unused-import; the type is public API.
