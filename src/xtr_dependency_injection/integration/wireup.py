@@ -177,6 +177,7 @@ def engine_container(kernel: CompiledKernel | BootedKernel, /) -> AsyncContainer
     # A defensive isinstance guard for foreign callers (e.g. plain wireup users
     # that hand us a mock); every legitimate caller has the union type.
     if not isinstance(kernel, (CompiledKernel, BootedKernel)):  # pyright: ignore[reportUnnecessaryIsInstance]
+        # Reached by callers outside the type checker.
         message = "engine_container needs a CompiledKernel or BootedKernel"  # pyright: ignore[reportUnreachable]
         raise InvalidArgumentTypeError(message)
     return kernel._engine  # noqa: SLF001 — the integration module owns this contract.  # pyright: ignore[reportPrivateUsage]

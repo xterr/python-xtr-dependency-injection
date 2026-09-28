@@ -51,11 +51,13 @@ class WrongType:
 
 
 class NullableForwardRefTracing:
+    # A string annotation is the case under test.
     def __init__(self, inner: Annotated["Bus | None", AutowireDecorated()]) -> None:  # noqa: UP037
         self.inner: Bus | None = inner
 
 
 class ForwardRefTracing:
+    # A string annotation is the case under test.
     def __init__(self, inner: Annotated["Bus", AutowireDecorated()]) -> None:  # noqa: UP037
         self.inner: Bus = inner
 

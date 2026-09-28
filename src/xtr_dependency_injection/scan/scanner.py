@@ -165,6 +165,7 @@ class Scanner:
             if late and label in _EARLY_ONLY:
                 raise ConfigProviderError(
                     scanned.name,
+                    # A message split where it reads naturally.
                     f"{label} was found by a scan requested while loading bundles, "  # noqa: ISC003
                     + "after configs were resolved; put it in an early resource",
                 )

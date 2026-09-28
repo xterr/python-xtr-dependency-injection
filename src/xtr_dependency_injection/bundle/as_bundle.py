@@ -47,6 +47,7 @@ def as_bundle(
     if name in _RESERVED:
         raise BundleDefinitionError(name, "the name is reserved")
     for index, resource in enumerate(resources):
+        # Callers outside the type checker.
         if not isinstance(resource, str) or not resource:  # pyright: ignore[reportUnnecessaryIsInstance]
             raise BundleDefinitionError(
                 name, f"resources[{index}] must be a non-empty string, got {resource!r}"

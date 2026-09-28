@@ -42,12 +42,14 @@ class Picky:
 class ForwardRefEnvelope:
     def __init__(
         self,
+        # A string annotation is the case under test.
         env_name: Annotated["str", Autowire(param="kernel.environment")],  # noqa: UP037
     ) -> None:
         self.env_name: str = env_name
 
 
 class ForwardRefPicky:
+    # A string annotation is the case under test.
     def __init__(self, mailer: Annotated["Mailer", Target("smtp")]) -> None:  # noqa: UP037
         self.mailer: Mailer = mailer
 
@@ -74,7 +76,7 @@ class MarkerBundle(Bundle):
         _ = services.set(_http, qualifier="http")
 
 
-_BUNDLES: dict[type[AnyBundle], Mapping[str, bool]] = {  # type: ignore[misc]
+_BUNDLES: dict[type[AnyBundle], Mapping[str, bool]] = {
     MarkerBundle: {"all": True},
 }
 

@@ -122,6 +122,7 @@ async def test_engine_container_returns_the_wireup_container_from_a_booted_kerne
 
 def test_engine_container_refuses_a_foreign_kernel() -> None:
     with pytest.raises(TypeError, match="CompiledKernel or BootedKernel"):
+        # The wrong type is the case under test.
         _ = engine_container(object())  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
 

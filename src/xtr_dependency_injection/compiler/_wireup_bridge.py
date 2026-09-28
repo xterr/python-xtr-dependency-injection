@@ -54,6 +54,7 @@ def is_registered(container: AsyncContainer, service: type, qualifier: Hashable 
     only answers by trying to build. This is the one place that reaches into
     wireup's registry to answer without side effects.
     """
+    # Wireup has no public predicate; see the docstring.
     return container._registry.is_type_with_qualifier_known(service, qualifier)  # noqa: SLF001
 
 

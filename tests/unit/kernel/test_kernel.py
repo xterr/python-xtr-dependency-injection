@@ -38,7 +38,7 @@ pytestmark = pytest.mark.anyio
 
 APP = "tests.fixtures.app_kernel"
 
-_DEFAULT_BUNDLES: dict[type[AnyBundle], Mapping[str, bool]] = {  # type: ignore[misc]
+_DEFAULT_BUNDLES: dict[type[AnyBundle], Mapping[str, bool]] = {
     EchoBundle: {"all": True},
     ChorusBundle: {"all": True},
 }
@@ -52,7 +52,7 @@ def _clear_events() -> None:
 def _kernel(
     env: str = "dev",
     *,
-    bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,  # type: ignore[misc]
+    bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,
     name: str | None = None,
     allowed_envs: tuple[str, ...] | None = None,
 ) -> Kernel:
@@ -288,6 +288,7 @@ def test_run_accepts_a_sync_main() -> None:
 
 def test_run_refuses_a_non_int_result() -> None:
     def main() -> int:
+        # The wrong type is the case under test.
         return "done"  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
 
     with pytest.raises(TypeError, match="not an exit code"):

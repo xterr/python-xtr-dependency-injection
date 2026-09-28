@@ -46,6 +46,7 @@ def test_a_missing_required_bundle_without_ignore_raises_missing_bundle_error() 
 
 def test_a_required_target_that_is_not_a_bundle_class_raises() -> None:
     module = ModuleType("_xtr_probe_not_a_bundle")
+    # A module attribute set at run time, as an import would.
     setattr(module, "NotBundle", _NotABundle)  # noqa: B010
     sys.modules["_xtr_probe_not_a_bundle"] = module
 

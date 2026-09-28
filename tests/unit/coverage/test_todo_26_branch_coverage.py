@@ -102,6 +102,7 @@ def test_bind_callable_refuses_a_foreign_container_interface() -> None:
             return False
 
     with pytest.raises(TypeError, match="kernel-provided container"):
+        # A foreign container is the case under test.
         _ = bind_callable(Foreign(), lambda: None)  # pyright: ignore[reportArgumentType]
 
 

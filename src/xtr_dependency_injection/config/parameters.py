@@ -82,6 +82,7 @@ def _merge_into(
     owners: dict[tuple[str, ...], str],
 ) -> None:
     for key, value in values.items():
+        # Keys read from configuration need not be strings.
         if not isinstance(key, str) or "." in key:  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ConfigProviderError(source, f"parameter key {key!r} must be a string without '.'")
         here = (*path, key)

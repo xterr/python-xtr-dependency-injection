@@ -96,6 +96,7 @@ class PassConfig:
                 :class:`CompilerPassInterface`.
         """
         if not isinstance(compiler_pass, CompilerPassInterface):  # pyright: ignore[reportUnnecessaryIsInstance] — callers outside the type checker.
+            # Reached by callers outside the type checker.
             msg = f"{compiler_pass!r} does not implement CompilerPassInterface"  # pyright: ignore[reportUnreachable]
             raise InvalidArgumentTypeError(msg)
         self._passes[stage].setdefault(priority, []).append(compiler_pass)

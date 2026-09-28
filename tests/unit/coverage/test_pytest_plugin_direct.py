@@ -23,6 +23,7 @@ _ContainerFn = Callable[[BootedKernel], ContainerInterface]
 
 
 def test_xtr_kernel_fixture_fails_when_not_overridden() -> None:
+    # __wrapped__ is set by the fixture decorator, unknown to the checker.
     body = cast("_KernelFn", getattr(pytest_plugin.xtr_kernel, "__wrapped__"))  # noqa: B009
     with pytest.raises(pytest.fail.Exception, match="override the xtr_kernel fixture"):
         _ = body()
@@ -31,7 +32,9 @@ def test_xtr_kernel_fixture_fails_when_not_overridden() -> None:
 @pytest.mark.anyio
 async def test_booted_kernel_and_container_fixtures_yield_a_working_container() -> None:
     kernel = Kernel("xtr_dependency_injection", bundles={}, resources=())
+    # __wrapped__ is set by the fixture decorator, unknown to the checker.
     booted_body = cast("_BootedFn", getattr(pytest_plugin.booted_kernel, "__wrapped__"))  # noqa: B009
+    # __wrapped__ is set by the fixture decorator, unknown to the checker.
     container_body = cast("_ContainerFn", getattr(pytest_plugin.container, "__wrapped__"))  # noqa: B009
 
     gen = booted_body(kernel)

@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 
 import pytest
 
-from xtr_dependency_injection.builder import Origin
+from xtr_dependency_injection.builder import Definition, Origin
 from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.service_configurator import (
     BuildState,
@@ -209,7 +209,6 @@ def test_get_parameter_of_an_unset_name_raises() -> None:
 
 
 def test_set_definition_swaps_the_definition_and_records_the_override() -> None:
-    from xtr_dependency_injection.builder import Definition  # noqa: PLC0415
 
     state, builder = _builder()
 

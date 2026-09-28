@@ -21,6 +21,7 @@ __all__ = ["Apply", "Autoconfigurator", "Reader"]
 # What a reader finds is only meaningful to the bundle that reads it, so the
 # builder passes it through untyped.
 Reader: TypeAlias = "Callable[[object], Iterable[Any]]"  # pyright: ignore[reportExplicitAny]
+# What a reader found, passed through untyped.
 Apply: TypeAlias = "Callable[[object, Any, ServiceConfigurator], None]"  # pyright: ignore[reportExplicitAny]
 
 

@@ -49,6 +49,7 @@ class Slotted:
 
 
 class Defaulted:
+    # An unannotated parameter is the case under test.
     def __init__(self, dependency: Dependency, retries=3) -> None:  # noqa: ANN001  # pyright: ignore[reportMissingParameterType]
         self.dependency: Dependency = dependency
         self.retries: int = retries

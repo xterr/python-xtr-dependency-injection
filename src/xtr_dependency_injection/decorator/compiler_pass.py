@@ -56,6 +56,7 @@ def compiler_pass(
 
     def record(target: P) -> P:
         if not (isinstance(target, type) and issubclass(target, CompilerPassInterface)):  # pyright: ignore[reportUnnecessaryIsInstance] — callers outside the type checker.
+            # Reached by callers outside the type checker.
             msg = f"@compiler_pass needs a class implementing CompilerPassInterface, not {target!r}"  # pyright: ignore[reportUnreachable]
             raise InvalidArgumentTypeError(msg)
         return set_marker(target, _ATTRIBUTE, CompilerPassMarker(priority, stage))

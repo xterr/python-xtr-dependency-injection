@@ -18,6 +18,7 @@ from xtr_dependency_injection.compiler.wireup_compiler import (
     emit_injectables,
 )
 from xtr_dependency_injection.decorator.as_decorator import AutowireDecorated
+from xtr_dependency_injection.exception import ContainerCompilationError
 
 pytestmark = pytest.mark.anyio
 
@@ -205,7 +206,6 @@ async def test_stacked_decorations_wrap_in_order() -> None:
 
 
 def test_a_wireup_error_is_annotated_with_origins() -> None:
-    from xtr_dependency_injection.exception import ContainerCompilationError  # noqa: PLC0415
 
     with pytest.raises(ContainerCompilationError) as caught:
         _ = _compile(_definition(NeedsMissing, NeedsMissing, BETA))
@@ -262,7 +262,6 @@ class NeedsMailerFactory:
 
 
 def test_a_note_matches_type_names_by_word_boundary() -> None:
-    from xtr_dependency_injection.exception import ContainerCompilationError  # noqa: PLC0415
 
     # NeedsMailerFactory needs MailerFactory (unregistered); the message names
     # "MailerFactory". A substring match would also note the unrelated `Mailer`

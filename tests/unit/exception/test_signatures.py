@@ -30,11 +30,13 @@ class Dep:
     pass
 
 
+# A string annotation is the case under test.
 def _ctor(dep: Annotated["Dep", Target("x")]) -> None:  # noqa: UP037
     del dep
 
 
 class Service:
+    # A string annotation is the case under test.
     def __init__(self, dep: Annotated["Dep", Autowire(param="kernel.name")]) -> None:  # noqa: UP037
         self.dep: Dep = dep
 
@@ -74,6 +76,7 @@ def test_a_pre_set_signature_is_honored_verbatim() -> None:
     def synthesized() -> None: ...
 
     presented = inspect.Signature(parameters=[], return_annotation=Dep)
+    # __signature__ is not declared on the function type.
     setattr(synthesized, "__signature__", presented)  # noqa: B010
 
     assert evaluated_signature(synthesized) == presented

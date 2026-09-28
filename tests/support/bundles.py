@@ -44,6 +44,7 @@ def echo(config: EchoConfig) -> Echo:
 
 def tags_of(obj: object) -> tuple[str, ...]:
     tags: object = vars(obj).get("__echo_tags__", ()) if isinstance(obj, type) else ()
+    # Whatever a test left on the class.
     return tags if isinstance(tags, tuple) else ()  # pyright: ignore[reportUnknownVariableType]
 
 

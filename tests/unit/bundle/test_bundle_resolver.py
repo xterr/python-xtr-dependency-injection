@@ -102,7 +102,7 @@ class RaisesOnInit(Bundle):
 
 # Attach @as_bundle after the class body: as_bundle refuses classes needing arg-less constructor
 # checks in the signature, which `RaisesOnInit` still passes — the ctor raises only at build time.
-RaisesOnInit = as_bundle("raises_on_init")(RaisesOnInit)  # type: ignore[assignment]
+RaisesOnInit = as_bundle("raises_on_init")(RaisesOnInit)
 
 
 def _resolve(
@@ -228,6 +228,7 @@ def test_a_required_class_that_is_not_a_bundle_is_refused() -> None:
     class NotABundle:
         pass
 
+    # The wrong type is the case under test.
     _ = required_bundle(NotABundle)(BetaBundle)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
     try:
         with pytest.raises(BundleDefinitionError, match="not a Bundle"):

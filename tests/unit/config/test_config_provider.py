@@ -88,7 +88,7 @@ def test_an_unmarked_function_is_refused() -> None:
 
 def test_a_missing_return_type_is_refused() -> None:
     @configure
-    def provide():  # noqa: ANN202
+    def provide():  # noqa: ANN202 — an unannotated provider is the case under test
         return SampleConfig()
 
     with pytest.raises(ConfigProviderError, match="return annotation"):
@@ -138,6 +138,7 @@ def test_an_annotation_hidden_from_runtime_names_the_provider() -> None:
 def test_a_returned_value_of_the_wrong_type_is_refused() -> None:
     @configure
     def provide() -> SampleConfig:
+        # The wrong type is the case under test.
         return OtherConfig()  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
 
     with pytest.raises(ConfigProviderError, match="returned OtherConfig"):

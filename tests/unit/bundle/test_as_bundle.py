@@ -145,6 +145,7 @@ def test_a_bundle_requiring_constructor_arguments_is_refused() -> None:
 @pytest.mark.parametrize("resource", ["", 0, None])
 def test_a_resource_that_is_not_a_non_empty_string_is_refused(resource: object) -> None:
     with pytest.raises(BundleDefinitionError, match="must be a non-empty string"):
+        # The wrong type is the case under test.
         _ = as_bundle("bad_resources", resources=[resource])  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
 

@@ -117,7 +117,7 @@ def _engine_types_in(annotation: object, seen: set[int] | None = None) -> list[s
 
 def _hints_of(obj: object) -> dict[str, object]:
     try:
-        return get_type_hints(obj, include_extras=True)  # type: ignore[arg-type]
+        return get_type_hints(obj, include_extras=True)
     except Exception:  # noqa: BLE001 — a hint that cannot be resolved cannot leak the engine.
         return {}
 
@@ -131,7 +131,8 @@ def _public_objects() -> list[tuple[str, object]]:
     )
     found: list[tuple[str, object]] = []
     for module in modules:
-        for name in module.__all__:  # pyright: ignore[reportAny]
+        for name in module.__all__:  # pyright: ignore[reportAny] — a module's __all__ is untyped
+            # Whatever the module exports.
             obj: object = getattr(module, name)  # pyright: ignore[reportAny]
             found.append((f"{module.__name__}.{name}", obj))
     return found
@@ -168,6 +169,6 @@ def test_the_no_engine_public_signature_guard_can_fail() -> None:
 
 def test_engine_container_returns_the_engine() -> None:
     sig = inspect.signature(integration_wireup.engine_container, eval_str=False)
-    ret: object = sig.return_annotation  # pyright: ignore[reportAny]
+    ret: object = sig.return_annotation  # pyright: ignore[reportAny] — an annotation is untyped
 
     assert ret in ("AsyncContainer", wireup.AsyncContainer)

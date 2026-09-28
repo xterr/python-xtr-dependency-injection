@@ -71,6 +71,7 @@ class SlottedCache:
 class WeakSlottedCache:
     # The interpreter fills __weakref__ itself; there is nothing to initialise.
     __slots__ = (
+        # The interpreter fills it.
         "__weakref__",  # pyright: ignore[reportUninitializedInstanceVariable]
         "entries",
     )
@@ -87,6 +88,7 @@ def test_a_short_lived_class_without_weak_references_is_refused(lifetime: str) -
     state = _state()
     _ = (
         ServiceConfigurator(state, Origin("app", "tests"))
+        # The wrong type is the case under test.
         .set(SlottedCache, lifetime=lifetime)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
         .add_tag(RESET_TAG, method="clear")
     )

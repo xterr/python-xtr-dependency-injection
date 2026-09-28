@@ -641,6 +641,7 @@ def _load_bundles_module(package_name: str) -> Mapping[type[AnyBundle], Mapping[
             module_name, "BUNDLES must be a mapping of bundle class to activity flags"
         )
     result: dict[type[AnyBundle], Mapping[str, bool]] = {}
+    # An application's BUNDLES, checked entry by entry below.
     for cls, flags in raw.items():  # pyright: ignore[reportUnknownVariableType]
         cls_obj = cast("object", cls)
         if not (isinstance(cls_obj, type) and issubclass(cls_obj, Bundle)):

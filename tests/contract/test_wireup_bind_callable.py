@@ -57,6 +57,7 @@ def add(left: int, right: int) -> int:
     return left + right
 
 
+# A forward reference is the case under test.
 async def greet_forward_ref(name: str, greeting: XtrInjected["Greeting"]) -> str:  # noqa: UP037
     return f"{greeting.text} {name}"
 

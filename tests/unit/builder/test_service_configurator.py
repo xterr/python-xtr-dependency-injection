@@ -35,7 +35,7 @@ def mailer_resource() -> Iterator[Mailer]:
     yield Mailer()
 
 
-def untyped():  # noqa: ANN201
+def untyped():  # noqa: ANN201 — an unannotated factory is the case under test
     return Mailer()
 
 
@@ -84,6 +84,7 @@ def test_a_factory_without_a_return_type_is_refused() -> None:
 
 def test_set_of_something_that_is_not_a_class_or_a_function_is_refused() -> None:
     with pytest.raises(TypeError, match="takes a class or a function") as caught:
+        # The wrong type is the case under test.
         _ = _services().set(Mailer())  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
     assert isinstance(caught.value, DependencyInjectionError)

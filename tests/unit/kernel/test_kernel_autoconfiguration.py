@@ -41,7 +41,7 @@ pytestmark = pytest.mark.anyio
 def _kernel(
     resources: tuple[str, ...] = ("tests.fixtures.app_autoconfigure",),
     *,
-    bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,  # type: ignore[misc]
+    bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,
 ) -> Kernel:
     return Kernel(
         "tests.fixtures.app_autoconfigure",
