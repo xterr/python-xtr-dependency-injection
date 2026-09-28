@@ -17,6 +17,7 @@ from xtr_dependency_injection.exception import (
     ConfigProviderError,
     MissingBundleError,
     ParameterNotFoundError,
+    ServiceCircularReferenceError,
     UnknownConfigTypeError,
     UnknownServiceError,
 )
@@ -33,6 +34,10 @@ class Mailer:
 
 
 class OtherMailer(Mailer):
+    pass
+
+
+class _Transport:
     pass
 
 
@@ -284,3 +289,14 @@ def test_an_unknown_key_is_refused() -> None:
 
 
 _ = Prepend  # touched to avoid unused-import; the type is public API.
+
+
+def test_aliases_looping_back_are_reported_as_a_loop() -> None:
+    state, builder = _builder()
+    state.aliases[(OtherMailer, None)] = (_Transport, None)
+    state.aliases[(_Transport, None)] = (OtherMailer, None)
+
+    with pytest.raises(ServiceCircularReferenceError) as caught:
+        _ = builder.find_definition(OtherMailer)
+
+    assert caught.value.path == ((OtherMailer, None), (_Transport, None), (OtherMailer, None))

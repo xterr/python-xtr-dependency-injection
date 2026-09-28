@@ -15,6 +15,7 @@ from xtr_dependency_injection.compiler.pass_stage import PassStage
 from xtr_dependency_injection.exception import (
     ConfigProviderError,
     MissingBundleError,
+    ServiceCircularReferenceError,
     UnknownConfigTypeError,
     UnknownServiceError,
 )
@@ -122,11 +123,16 @@ class ContainerBuilder:
         Raises:
             UnknownServiceError: If neither a definition nor an alias
                 resolves to a definition.
+            ServiceCircularReferenceError: If the aliases loop back on
+                themselves.
         """
         key: ServiceKey = (service, qualifier)
-        seen: set[ServiceKey] = set()
-        while key in self._state.aliases and key not in seen:
-            seen.add(key)
+        path: list[ServiceKey] = []
+        while key in self._state.aliases:
+            if key in path:
+                loop = (*path[path.index(key) :], key)
+                raise ServiceCircularReferenceError(key, loop)
+            path.append(key)
             key = self._state.aliases[key]
         return self._require(key, "find_definition")
 
