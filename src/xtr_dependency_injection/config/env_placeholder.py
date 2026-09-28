@@ -312,7 +312,8 @@ def resolve_env_placeholders(value: object, get_env: Callable[[str], object]) ->
 
     Raises:
         EnvPlaceholderError: If a token embedded in a string resolves to
-            something other than a string, number or bool.
+            something other than a string, number or bool, or was made by
+            another process.
         MissingEnvironmentVariableError: If a variable is not set and has no
             default.
         InvalidEnvironmentVariableError: If a processor or cast refuses a
@@ -335,11 +336,30 @@ def resolve_env_placeholders(value: object, get_env: Callable[[str], object]) ->
     return rebuild(value, leaf)
 
 
+def _refuse_stale_tokens(value: str) -> None:
+    """Refuse a token no placeholder of this process made — carried over from another one.
+
+    Raises:
+        EnvPlaceholderError: Naming the token, which would otherwise be read
+            as the value itself.
+    """
+    if "env_" not in value:
+        return
+    for match in _TOKEN.finditer(value):
+        if match.group(1) not in _BY_DIGEST:
+            reason = (
+                "was made by another process — tokens are keyed per process — so it names no "
+                "variable here; resolve the configuration in the process that made it"
+            )
+            raise EnvPlaceholderError(match.group(0), reason)
+
+
 def _resolve_string(value: str, value_of: Callable[[EnvPlaceholder], object]) -> object:
     """Return ``value`` with its tokens replaced — in one pass, so a value is never rescanned."""
     whole = _REGISTRY.get(value)
     if whole is not None:  # a placeholder that lost its type on the way — ``str(placeholder)``
         return value_of(whole)
+    _refuse_stale_tokens(value)
     parts: list[str] = []
     position = 0
     for held, (start, end) in _tokens_in(value):

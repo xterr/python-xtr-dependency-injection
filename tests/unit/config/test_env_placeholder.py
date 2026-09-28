@@ -221,13 +221,14 @@ def test_a_value_holding_another_token_is_not_resolved_again() -> None:
     assert resolved == f"{other}-b"
 
 
-def test_a_string_looking_like_a_token_is_left_alone() -> None:
+def test_a_string_looking_like_a_token_names_no_placeholder_and_is_refused() -> None:
     host = placeholder("string:LOOKALIKE")
     forged = f"env_string_LOOKALIKE_{'0' * 32}"
 
     assert forged != host.token
-    assert resolve_env_placeholders(forged, lambda _: "x") == forged
     assert env_placeholders_in(forged) == []
+    with pytest.raises(EnvPlaceholderError):
+        _ = resolve_env_placeholders(forged, lambda _: "x")
 
 
 def test_a_token_run_into_preceding_text_is_still_found() -> None:
@@ -236,3 +237,16 @@ def test_a_token_run_into_preceding_text_is_still_found() -> None:
     resolved = resolve_env_placeholders(f"env_x_{host}/path", lambda _: "h")
 
     assert resolved == "env_x_h/path"
+
+
+def test_a_token_another_process_made_is_refused_rather_than_read_as_the_value() -> None:
+    stale = f"https://env_HOST_{'0' * 32}/api"
+
+    with pytest.raises(EnvPlaceholderError, match="another process"):
+        _ = resolve_env_placeholders(stale, _get_env)
+
+
+def test_a_string_without_tokens_resolves_to_itself() -> None:
+    assert (
+        resolve_env_placeholders("https://example.com/api", _get_env) == "https://example.com/api"
+    )
