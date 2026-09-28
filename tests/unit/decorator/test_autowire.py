@@ -21,6 +21,11 @@ from xtr_dependency_injection.decorator.autowire import (
 )
 from xtr_dependency_injection.decorator.target import Target
 
+try:
+    from fastapi.params import Depends as FrameworkDependency
+except ModuleNotFoundError:
+    FrameworkDependency = None
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -35,10 +40,32 @@ def _metadata(annotation: object) -> tuple[object, ...]:
     return parts[1:]
 
 
+def _unwrapped(entry: object) -> object:
+    """Return the engine's injection request ``entry`` stands for.
+
+    ``wireup.Inject()`` hands back its request wrapped in the web framework's
+    own dependency marker whenever that framework is importable, and the bare
+    request otherwise — so one rewrite yields two shapes depending on what is
+    installed. The wrapper holds the request in a callable flagged
+    ``__is_wireup_depends__``, and calling it gives the request back; unwrapping
+    here keeps every assertion below about the request itself, true either way.
+
+    The type is checked before any attribute is read: an unwrapped request
+    answers every unknown attribute with an error telling the caller to set up
+    an integration, so probing one for ``dependency`` raises instead of missing.
+    """
+    if FrameworkDependency is None or not isinstance(entry, FrameworkDependency):
+        return entry
+    dependency = cast("object", entry.dependency)
+    if cast("bool", getattr(dependency, "__is_wireup_depends__", False)):
+        return cast("Callable[[], object]", dependency)()
+    return entry
+
+
 def _rewritten_metadata(target: object, name: str) -> tuple[object, ...]:
     signature = inspect.signature(cast("Callable[..., object]", target), eval_str=True)
     rewritten = to_engine_signature(signature)
-    return _metadata(_annotations(rewritten)[name])
+    return tuple(_unwrapped(entry) for entry in _metadata(_annotations(rewritten)[name]))
 
 
 def _echo(value: object) -> object:
