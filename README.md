@@ -788,6 +788,10 @@ Small pieces every bundle with named, configured services ends up needing:
   and lifecycle, which the application keeps closing. `reference.exists_in(container)` checks
   it at boot, `await reference.resolve(container)` fetches it, and `str(reference)` names it
   briefly for an error message (`Redis['locks']`).
+- **`bundle_active(builder, name)`** — whether the bundle `name` is active in this build, from
+  any hook from `build` on: wire a peer's integration only when the peer is there
+  (`if bundle_active(builder, "logging"): ...`). It reads `kernel.bundles`, so before `build` it
+  answers `False`.
 - **`await optional_service(container, T, qualifier)`** — the service, or `None` when the
   container does not provide it: a logger for the bundle's channel, when logging is active.
 - **`one_or_many(value)`** — a config field an application writes as one entry or several
