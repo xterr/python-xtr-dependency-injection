@@ -710,8 +710,9 @@ selects between multiple registrations of the same type.
 `failed to resolve <T>: <engine message>`, with the engine error kept as `__cause__`. A
 `lifetime="scoped"` or `lifetime="transient"` service exists only inside a scope, so asking
 for one from the container is refused: those services are built inside a scope, so resolve
-them from an injected callable, or from `bind_callable(container, target, per_call_scope=True)`
-— the `ServiceResolutionError` for a scope mismatch says exactly that.
+them from an injected callable, from `bind_callable(container, target, per_call_scope=True)`,
+or from the container a [unit of work](#units-of-work) gives — the `ServiceResolutionError`
+for a scope mismatch says exactly that.
 
 A service that asks for a dependency the container has no definition for does not fail
 obscurely at build: the compiler raises a `ContainerCompilationError` whose message reads
@@ -778,7 +779,8 @@ raises `UnknownLocatorKeyError` (a `LookupError`).
 
 Returns an async function that calls a handler, a command or any callable with its
 `Injected[...]` parameters filled. A class target is resolved from the container on first
-call. What it needs is checked at bind time, so a bundle binding in `boot` fails at boot:
+call. What it needs is checked at bind time, so a bundle binding in `boot` fails at boot. A
+call made inside a [unit of work](#units-of-work) joins it:
 
 ```python
 from xtr_dependency_injection import bind_callable
@@ -787,6 +789,35 @@ from xtr_dependency_injection import bind_callable
 bound = bind_callable(container, my_handler)
 result = await bound(message)
 ```
+
+### Units of work
+
+A unit of work is one scope everything done for one message, job or task shares: a
+`lifetime="scoped"` service — a database session — is built once per unit, seen by
+everything in it, and released when the unit ends, even when it raised, which the service's
+cleanup sees. Whoever owns the unit opens it; what runs inside joins it:
+
+```python
+from xtr_dependency_injection import bind_callable, current_unit_of_work, unit_of_work
+
+async with unit_of_work(container) as unit:
+    session = await unit.get(Session)  # the unit's own
+    await bound_handler(message)  # a bind_callable call: the same Session
+```
+
+- `unit_of_work(container)` opens one — or joins the one that container already has open, so
+  work started inside a unit shares its instances. A unit another container opened — a
+  second kernel's — is never joined: this container opens its own, inside. The container it
+  yields resolves scoped services as well as singletons.
+- `current_unit_of_work()` returns the open unit's container, or `None` outside one.
+- A call `bind_callable` bound without `per_call_scope` joins the unit its container has open
+  where it is made: its `Injected[...]` scoped parameters, and a class target, come from the
+  unit. Outside one it behaves as it always has. A `per_call_scope=True` call keeps a scope of
+  its own, inside a unit or not.
+
+A library opens a unit around what it runs for one piece of work — the message bus does, per
+message — and a service that needs "the one for this unit" resolves it from
+`current_unit_of_work()`.
 
 ### Helpers for bundles
 
@@ -1058,6 +1089,7 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 | Tag collections | `Sequence[T]` / `Mapping[Hashable, T]` / `ServiceLocator` | Inject every tagged service, eagerly or lazily |
 | Reset between messages | `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")` | Rebind stateful services per message |
 | Lifecycle | `async Bundle.boot()` / `async Bundle.shutdown()` reading `self.container`; `@on_boot` / `@on_shutdown` | Async startup and cleanup |
+| Unit of work | `unit_of_work(container)` / `current_unit_of_work()` | One scope shared by everything done for one piece of work |
 | Container access | `xtr_service_contracts.ContainerInterface` — kernel-provided | Get / has by type plus qualifier, plus named parameters |
 | Lazy service map | `xtr_dependency_injection.ServiceLocator` | A `Mapping[Hashable, T]` that builds entries on demand |
 | Diagnostics | `CompiledKernel.report`, `debug:*` commands | Inspect bundles, configs, definitions, scan |

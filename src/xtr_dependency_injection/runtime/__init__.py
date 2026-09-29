@@ -10,6 +10,7 @@ from .optional_service import optional_service
 from .reference import Reference
 from .service_locator import ServiceLocator
 from .services_resetter import ServicesResetter
+from .unit_of_work import current_unit_of_work, unit_of_work
 
 __all__ = [
     "EnvVarLoaderInterface",
@@ -19,5 +20,7 @@ __all__ = [
     "ServiceLocator",
     "ServicesResetter",
     "bind_callable",
+    "current_unit_of_work",
     "optional_service",
+    "unit_of_work",
 ]

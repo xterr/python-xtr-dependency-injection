@@ -72,6 +72,8 @@ PUBLIC = {
     "named_factory",
     "optional_service",
     "one_or_many",
+    "unit_of_work",
+    "current_unit_of_work",
 }
 
 

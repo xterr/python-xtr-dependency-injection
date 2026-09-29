@@ -31,7 +31,7 @@ from .env_var_processors_locator import EnvVarProcessorsLocator
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
-    from wireup import AsyncContainer
+    from wireup import AsyncContainer, ScopedAsyncContainer
 
 __all__ = ["WireupContainer"]
 
@@ -39,27 +39,37 @@ T = TypeVar("T")
 
 _SCOPE_ADVICE = (
     "scoped and transient services are built inside a scope; resolve them from an "
-    "injected callable, or from bind_callable(container, target, per_call_scope=True)"
+    "injected callable, from bind_callable(container, target, per_call_scope=True), "
+    "or from the container unit_of_work(container) gives"
 )
 """How this package resolves a scoped or transient service, for the get() advice."""
 
 
 @final
 class WireupContainer(ContainerInterface):
-    """Wraps a wireup ``AsyncContainer`` behind :class:`ContainerInterface`."""
+    """Wraps a wireup ``AsyncContainer`` behind :class:`ContainerInterface`.
 
-    __slots__ = ("_container",)
+    Given a ``scope`` of that container too, it is a unit of work's view: it
+    resolves scoped services — once each, for the scope's lifetime — as well
+    as singletons, and reads the same parameters.
+    """
 
-    def __init__(self, container: AsyncContainer) -> None:
-        """Wrap ``container`` — no state of our own."""
+    __slots__ = ("_container", "_scope")
+
+    def __init__(
+        self, container: AsyncContainer, scope: ScopedAsyncContainer | None = None
+    ) -> None:
+        """Wrap ``container``, resolving through ``scope`` when one is given."""
         self._container = container
+        self._scope = scope
 
     @override
     async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
         if not is_registered(self._container, service, qualifier):
             raise ServiceNotFoundError((service, qualifier))
+        resolver = self._scope if self._scope is not None else self._container
         try:
-            return await self._container.get(service, qualifier)
+            return await resolver.get(service, qualifier)
         except ServiceNotFoundError:
             raise
         except Exception as error:
@@ -149,6 +159,7 @@ class WireupContainer(ContainerInterface):
         Public consumers see this container behind :class:`ContainerInterface`;
         the kernel's internal glue (``bind_callable``, ``call_injected``,
         ``testing.boot_for_test``) needs the raw engine to enter scopes, run
-        overrides and inject callables.
+        overrides and inject callables. A unit of work's view returns the
+        root engine too, never its scope.
         """
         return self._container

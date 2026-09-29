@@ -54,7 +54,9 @@ from .runtime import (
     ServiceLocator,
     ServicesResetter,
     bind_callable,
+    current_unit_of_work,
     optional_service,
+    unit_of_work,
 )
 from .scan import DEFAULT_EXCLUDES
 
@@ -103,6 +105,7 @@ __all__ = [
     "bundle_active",
     "compiler_pass",
     "configure",
+    "current_unit_of_work",
     "env",
     "exclude",
     "is_container_supplied",
@@ -115,6 +118,7 @@ __all__ = [
     "qualified_name",
     "remove_if_missing",
     "required_bundle",
+    "unit_of_work",
     "when",
     "when_not",
 ]
