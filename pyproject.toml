@@ -1,6 +1,6 @@
 [project]
 name = "xtr-dependency-injection"
-version = "1.5.0"
+version = "2.0.0"
 description = "A bundle and kernel layer for the xtr libraries, compiled to a wireup container."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "wireup>=2.12,<3",
     "typing-extensions>=4.4",
-    "xtr-service-contracts>=1.0,<2",
+    "xtr-service-contracts>=2.0,<3",
 ]
 
 # The injection markers double as dependency declarations for applications
