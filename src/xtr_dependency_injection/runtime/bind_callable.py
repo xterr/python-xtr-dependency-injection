@@ -22,7 +22,7 @@ from xtr_dependency_injection.compiler._wireup_bridge import (
 from xtr_dependency_injection.exception import InvalidArgumentTypeError
 from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.exception._signatures import evaluated_signature
-from xtr_dependency_injection.runtime._unit_scope import open_unit
+from xtr_dependency_injection.runtime._unit_scope import entered, open_unit
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 if TYPE_CHECKING:
@@ -78,7 +78,8 @@ def bind_callable(
             instances are called. The class is resolved lazily, on the
             first call.
         per_call_scope: Enter a scope for every call, releasing what was
-            scoped to it when the call ends — even if it raised. Without it,
+            scoped to it when the call ends — even if it raised. That scope
+            is the unit of work of what the call starts. Without it,
             a call made inside a unit of work (see
             :func:`~xtr_dependency_injection.unit_of_work`) joins that unit;
             outside one, wireup enters a scope only when an ``Injected[...]``
@@ -132,7 +133,8 @@ def bind_callable(
             async with engine.enter_scope() as scope:
                 token = _scope.set(scope)
                 try:
-                    return await injected(*args, **kwargs)
+                    with entered(engine, scope):
+                        return await injected(*args, **kwargs)
                 finally:
                     _scope.reset(token)
 

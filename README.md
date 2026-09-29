@@ -806,14 +806,17 @@ async with unit_of_work(container) as unit:
 ```
 
 - `unit_of_work(container)` opens one — or joins the one that container already has open, so
-  work started inside a unit shares its instances. A unit another container opened — a
-  second kernel's — is never joined: this container opens its own, inside. The container it
+  work started inside a unit shares its instances. `unit_of_work(container, join=False)` opens
+  one of its own inside it, for new work — a message a worker received. A unit another
+  container opened — a second kernel's — is never joined: this container opens its own, inside. The container it
   yields resolves scoped services as well as singletons.
 - `current_unit_of_work()` returns the open unit's container, or `None` outside one.
 - A call `bind_callable` bound without `per_call_scope` joins the unit its container has open
   where it is made: its `Injected[...]` scoped parameters, and a class target, come from the
   unit. Outside one it behaves as it always has. A `per_call_scope=True` call keeps a scope of
-  its own, inside a unit or not.
+  its own, inside a unit or not, and that scope is the unit of what the call starts — a message
+  a command dispatches shares the command's scoped services. So is a request's scope, for what
+  the request starts.
 
 A library opens a unit around what it runs for one piece of work — the message bus does, per
 message — and a service that needs "the one for this unit" resolves it from

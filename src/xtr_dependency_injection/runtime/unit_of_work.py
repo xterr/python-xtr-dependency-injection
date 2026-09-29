@@ -8,7 +8,8 @@ without a scope of its own.
 
 Units of one container do not nest: opening one while another is open on the
 same container joins it, so work started from inside a unit — a message
-dispatched while another is handled — shares its instances. A unit of another
+dispatched while another is handled — shares its instances. Only new work —
+a message a worker received — asks for one of its own inside. A unit of another
 container — a second kernel in the process — is never joined: that container
 opens one of its own, inside.
 """
@@ -32,7 +33,9 @@ if TYPE_CHECKING:
 __all__ = ["current_unit_of_work", "unit_of_work"]
 
 
-def unit_of_work(container: ContainerInterface) -> AbstractAsyncContextManager[ContainerInterface]:
+def unit_of_work(
+    container: ContainerInterface, *, join: bool = True
+) -> AbstractAsyncContextManager[ContainerInterface]:
     """Open a unit of work on ``container``'s services — or join the one it has open.
 
     The returned container resolves scoped services as well as singletons:
@@ -45,19 +48,28 @@ def unit_of_work(container: ContainerInterface) -> AbstractAsyncContextManager[C
         session = await unit.get(AsyncSession)
     ```
 
+    Args:
+        container: Whose services the unit resolves.
+        join: Join the unit ``container`` has open, if any. ``False`` opens
+            one of its own inside it, for work that is new rather than part
+            of what is under way — a message a worker received, say; the
+            outer unit is back when it exits.
+
     Raises:
         InvalidArgumentTypeError: If ``container`` is not one a kernel built.
     """
-    return _unit_of_work(container)
+    return _unit_of_work(container, join=join)
 
 
 @asynccontextmanager
-async def _unit_of_work(container: ContainerInterface) -> AsyncGenerator[ContainerInterface]:
+async def _unit_of_work(
+    container: ContainerInterface, *, join: bool
+) -> AsyncGenerator[ContainerInterface]:
     if not isinstance(container, WireupContainer):
         msg = "a unit of work needs a kernel-provided container"
         raise InvalidArgumentTypeError(msg)
     engine = container._engine()  # noqa: SLF001 — the unit owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
-    opened = open_unit(engine)
+    opened = open_unit(engine) if join else None
     if opened is not None:
         yield WireupContainer(engine, opened)
         return

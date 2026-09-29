@@ -85,6 +85,20 @@ async def test_a_unit_opened_inside_another_joins_it() -> None:
     assert session.closed
 
 
+async def test_a_unit_asked_not_to_join_is_one_of_its_own_inside_another() -> None:
+    container = _container()
+
+    async with unit_of_work(container) as outer:
+        session = await outer.get(Session)
+        async with unit_of_work(container, join=False) as inner:
+            own = await inner.get(Session)
+            assert own is not session
+        assert own.closed
+        assert await (await _current()).get(Session) is session
+
+    assert session.closed
+
+
 async def test_a_unit_of_another_container_is_not_joined() -> None:
     first, second = _container(), _container()
 
@@ -183,6 +197,25 @@ async def test_a_call_bound_with_its_own_scope_keeps_it_inside_a_unit() -> None:
         own = await unit.get(Session)
 
     assert received[0] is not own
+    assert received[0].closed
+
+
+async def test_what_a_call_bound_with_its_own_scope_starts_joins_that_scope() -> None:
+    container = _container()
+    received: list[Session] = []
+
+    async def handler(session: Injected[Session]) -> None:
+        received.append(session)
+
+    inner = bind_callable(container, handler)
+
+    async def command(session: Injected[Session]) -> None:
+        received.append(session)
+        _ = await inner()
+
+    _ = await bind_callable(container, command, per_call_scope=True)()
+
+    assert received[0] is received[1]
     assert received[0].closed
 
 

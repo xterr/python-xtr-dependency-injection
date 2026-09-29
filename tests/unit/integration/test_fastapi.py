@@ -9,9 +9,10 @@ import pytest
 from starlette.applications import Starlette
 from starlette.requests import HTTPConnection
 
+from tests.fixtures.app_env import AsyncSession, MailBundle
 from tests.fixtures.app_kernel.services import Greeter
 from tests.support.bundles import ChorusBundle, EchoBundle
-from xtr_dependency_injection import Kernel
+from xtr_dependency_injection import Kernel, current_unit_of_work
 from xtr_dependency_injection.exception import FastapiIntegrationError
 from xtr_dependency_injection.integration.fastapi import attach, detach, provider, request_scope
 
@@ -87,6 +88,27 @@ async def test_the_service_resolver_resolves_inside_a_request_scope() -> None:
     assert isinstance(greeter, Greeter)
     # The fixture kernel uppercases the greeting and decorates the echo.
     assert greeter.greet() == "please, HELLO!"
+
+
+@pytest.mark.anyio
+async def test_a_request_is_the_unit_of_work_what_it_starts_joins() -> None:
+    app = Starlette()
+    kernel = Kernel(
+        "tests.fixtures.app_env",
+        bundles={MailBundle: {"all": True}},
+        env="test",
+        environ={"MAIL_PORT": "2525"},
+    )
+    attach(app, kernel.build())
+    resolve = provider("service", AsyncSession, None)
+
+    async with request_scope(app):
+        session = await resolve()
+        unit = current_unit_of_work()
+        assert unit is not None
+        assert await unit.get(AsyncSession) is session
+
+    assert current_unit_of_work() is None
 
 
 @pytest.mark.anyio

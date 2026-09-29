@@ -19,6 +19,7 @@ from starlette.requests import HTTPConnection  # noqa: TC002
 from wireup import AsyncContainer
 
 from xtr_dependency_injection.exception import FastapiIntegrationError
+from xtr_dependency_injection.runtime._unit_scope import entered
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Hashable
@@ -81,8 +82,10 @@ def request_scope(app: Starlette) -> AbstractAsyncContextManager[None]:
     """Open the container scope one request's scoped services live in.
 
     While the returned context is entered, the ``service`` resolvers of this
-    module resolve from the scope; it closes — and the resolvers stop — when
-    the context exits, even when the body raises.
+    module resolve from the scope, and it is the unit of work what the request
+    starts joins — a message it dispatches shares its scoped services. It
+    closes — and the resolvers stop — when the context exits, even when the
+    body raises.
 
     Raises:
         FastapiIntegrationError: On enter, if no kernel is attached to
@@ -99,7 +102,8 @@ async def _request_scope(app: Starlette) -> AsyncGenerator[None, None]:
     async with attached.engine.enter_scope() as scoped:
         token = _SCOPED.set(scoped)
         try:
-            yield
+            with entered(attached.engine, scoped):
+                yield
         finally:
             _SCOPED.reset(token)
 
