@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Final, Protocol, cast, final
 
 # The framework resolves the resolvers' annotations at runtime, so the
 # connection class must be importable when it does.
-from starlette.requests import HTTPConnection  # noqa: TC002
+from starlette.requests import HTTPConnection  # noqa: TC002 — read at runtime
 from wireup import AsyncContainer
 
 from xtr_dependency_injection.exception import FastapiIntegrationError
@@ -34,6 +34,12 @@ __all__ = ["provider", "request_scope"]
 NO_KERNEL: Final = (
     "this route asks the container for a dependency, but no kernel serves "
     "this application: call xtr_http_kernel.setup(app, kernel)"
+)
+
+NO_SCOPE: Final = (
+    "this dependency needs the container, but no request scope is open: it can "
+    "only be resolved while a request of an application wired with "
+    "xtr_http_kernel.setup(app, kernel) is served"
 )
 
 STATE_KEY: Final = "_xtr_dependency_injection"
@@ -149,7 +155,7 @@ def _service_resolver(
     async def resolve() -> object:
         scoped = _SCOPED.get()
         if scoped is None:
-            raise FastapiIntegrationError(NO_KERNEL)
+            raise FastapiIntegrationError(NO_SCOPE)
         return await scoped.get(service, qualifier)
 
     resolve.__name__ = name

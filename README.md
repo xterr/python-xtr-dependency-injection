@@ -866,7 +866,8 @@ Hooks are injected: `Injected[...]` parameters are filled, sync or async. A boot
 shuts down the bundles that already booted, in reverse, and closes the container —
 `@on_shutdown` hooks run only after a boot that succeeded; a `BaseException` (including
 `KeyboardInterrupt`) triggers the same rollback and propagates. Shutdown runs every step even
-if one fails, and raises the failures together as an `ExceptionGroup`. A generator factory's
+if one fails, and raises the failures together as an `ExceptionGroup` — or, when a step raised
+a `BaseException`, that one as it arrived, once every step ran. A generator factory's
 cleanup runs as the container closes; put cleanup that must survive an error in `finally`,
 because wireup throws a scope's error into the generator.
 

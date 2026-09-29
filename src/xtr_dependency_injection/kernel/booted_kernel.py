@@ -60,27 +60,28 @@ class BootedKernel:
     async def shutdown(self) -> None:
         """Run the application's ``@on_shutdown`` hooks, then every bundle's, then close.
 
-        Bundles shut down in reverse order; the container is always closed —
-        running every generator factory's cleanup — even when a step aborts.
-        An ``Exception`` from any step does not stop the others, and they are
-        raised together once the container has closed; a ``BaseException`` (a
-        cancellation) closes the container, then propagates. A second call
-        does nothing.
+        Bundles shut down in reverse order, and the container is closed last —
+        running every generator factory's cleanup. No step stops the others:
+        once every one ran, the first ``BaseException`` (a cancellation, an
+        interrupt) propagates as it arrived; otherwise every ``Exception`` is
+        raised together. A second call does nothing.
 
         Raises:
-            ExceptionGroup: If any step raised an ``Exception``.
+            ExceptionGroup: If a step raised an ``Exception``, and none a
+                ``BaseException``.
         """
         if self._shut_down:
             return
         self._shut_down = True
-        errors: list[Exception] = []
-        try:
-            for hook in self._on_shutdown:
-                await _attempt(errors, lambda hook=hook: call_injected(self._engine, hook))
-            for bundle in reversed(self._bundles):
-                await _attempt(errors, lambda bundle=bundle: bundle.shutdown())
-        finally:
-            await _attempt(errors, self._engine.close)
+        failures: list[BaseException] = []
+        for hook in self._on_shutdown:
+            await _attempt(failures, lambda hook=hook: call_injected(self._engine, hook))
+        for bundle in reversed(self._bundles):
+            await _attempt(failures, lambda bundle=bundle: bundle.shutdown())
+        await _attempt(failures, self._engine.close)
+        errors = [failure for failure in failures if isinstance(failure, Exception)]
+        if len(errors) < len(failures):
+            raise next(failure for failure in failures if not isinstance(failure, Exception))
         if errors:
             msg = "the kernel failed to shut down cleanly"
             raise ExceptionGroup(msg, errors)
@@ -149,10 +150,10 @@ def _prepare_for_engine(
     return wrapper
 
 
-async def _attempt(errors: list[Exception], step: Callable[[], object]) -> None:
+async def _attempt(failures: list[BaseException], step: Callable[[], object]) -> None:
     try:
         result = step()
         if inspect.isawaitable(result):
             _ = cast("object", await result)
-    except Exception as error:  # noqa: BLE001 — collected and raised together.
-        errors.append(error)
+    except BaseException as failure:  # noqa: BLE001 — collected; raised again once every step ran.
+        failures.append(failure)

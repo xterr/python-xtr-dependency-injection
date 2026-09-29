@@ -41,7 +41,7 @@ class AttributeAutoconfigurationPass:
         """
         # Imported here: the build state this pass writes into imports the
         # compiler, and so this module, while it is itself being defined.
-        from xtr_dependency_injection.builder.service_configurator import (  # noqa: PLC0415
+        from xtr_dependency_injection.builder.service_configurator import (  # noqa: PLC0415 — import cycle
             ServiceConfigurator,
         )
 

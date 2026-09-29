@@ -184,6 +184,8 @@ class EnvVarProcessor(EnvVarProcessorInterface):
         """Return the variable ``name`` from the environment, else from the loaders."""
         environ = os.environ if self._environ is None else self._environ
         value = environ.get(name)
+        # Truthiness, not ``is not None``: a variable set empty is asked of the
+        # loaders too, and kept only when none of them has it (see the module doc).
         if value:
             return value
         for loaded in self._loaded:

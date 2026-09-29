@@ -286,7 +286,9 @@ class ContainerBuilder:
         self._allow("set_parameter", "build", "prepend", "load", "process")
         if self._state.parameters_resolved:
             # A module-level import would be circular, as in _allow.
-            from xtr_dependency_injection.exception import BuilderPhaseError  # noqa: PLC0415
+            from xtr_dependency_injection.exception import (  # noqa: PLC0415 — import cycle
+                BuilderPhaseError,
+            )
 
             raise BuilderPhaseError("set_parameter", "process, after the parameters were resolved")
         parts = name.split(".")
@@ -329,7 +331,7 @@ class ContainerBuilder:
                 bundle, or if the target takes no config.
         """
         # Local import breaks a circular dependency with the bundle module.
-        from xtr_dependency_injection.bundle import NoConfig  # noqa: PLC0415
+        from xtr_dependency_injection.bundle import NoConfig  # noqa: PLC0415 — import cycle
 
         self._allow("prepend_extension_config", "prepend")
         described = qualified_name(transform)
@@ -384,7 +386,7 @@ class ContainerBuilder:
     def _allow(self, operation: str, *phases: Phase) -> None:
         # Local import mirrors the pattern in ServiceConfigurator to avoid a
         # circular import at module load time.
-        from xtr_dependency_injection.exception import (  # noqa: PLC0415
+        from xtr_dependency_injection.exception import (  # noqa: PLC0415 — import cycle
             BuilderFrozenError,
             BuilderPhaseError,
         )

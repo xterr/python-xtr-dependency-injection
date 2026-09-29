@@ -166,7 +166,7 @@ class Scanner:
                 raise ConfigProviderError(
                     scanned.name,
                     # A message split where it reads naturally.
-                    f"{label} was found by a scan requested while loading bundles, "  # noqa: ISC003
+                    f"{label} was found by a scan requested while loading bundles, "  # noqa: ISC003 — split for reading
                     + "after configs were resolved; put it in an early resource",
                 )
             cast("list[ScannedObject]", getattr(result, field)).append(scanned)

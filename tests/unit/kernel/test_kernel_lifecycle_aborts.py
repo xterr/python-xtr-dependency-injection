@@ -136,6 +136,31 @@ async def test_a_shutdown_aborted_by_a_base_exception_still_closes_the_container
     assert _closed == [True]
 
 
+@required_bundle(BootResolvingBundle)
+@as_bundle("res_abort_shutdown_first")
+class AbortingFirstShutdownBundle(Bundle):
+    """Shuts down before ``res_boot``, which it requires, and aborts with a ``BaseException``."""
+
+    @override
+    async def shutdown(self) -> None:
+        raise Abort("shutdown aborted")
+
+
+async def test_a_shutdown_aborted_by_a_base_exception_still_runs_every_other_step() -> None:
+    booted = await Kernel(
+        _PACKAGE,
+        env="dev",
+        bundles={AbortingFirstShutdownBundle: {"all": True}},
+        resources=(),
+    ).boot()
+
+    with pytest.raises(Abort):
+        await booted.shutdown()
+
+    assert _events == ["boot:res_boot", "shutdown:res_boot"]
+    assert _closed == [True]
+
+
 @as_bundle("res_fails_shutdown")
 class FailingShutdownBundle(Bundle):
     """Boots fine, then fails as it shuts down."""

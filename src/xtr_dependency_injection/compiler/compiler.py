@@ -74,7 +74,7 @@ class Compiler:
         ``process``.
         """
         # Imported here: the build state imports this module to own a compiler.
-        from xtr_dependency_injection.builder.container_builder import (  # noqa: PLC0415
+        from xtr_dependency_injection.builder.container_builder import (  # noqa: PLC0415 — import cycle
             ContainerBuilder,
         )
 

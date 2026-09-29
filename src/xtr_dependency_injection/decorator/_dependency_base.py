@@ -92,7 +92,9 @@ def set_dependency(
         # This upward import is deliberately lazy, for the reason above: only
         # a marker that names what to inject, or one the framework already
         # handed a service type, ever needs a resolver.
-        from xtr_dependency_injection.integration._resolvers import provider  # noqa: PLC0415
+        from xtr_dependency_injection.integration._resolvers import (  # noqa: PLC0415 — import cycle
+            provider,
+        )
 
         if param is not None:
             resolved = provider("param", param)

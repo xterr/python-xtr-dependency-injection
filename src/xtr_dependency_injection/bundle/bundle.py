@@ -118,8 +118,10 @@ class Bundle(Generic[ConfigT]):
         """
         # Deferred imports break a circular dependency:
         # bundle_metadata -> required_bundle -> bundle.
-        from .bundle_metadata import BundleMetadata as _BundleMetadata  # noqa: PLC0415
-        from .required_bundle import required_bundles_of  # noqa: PLC0415
+        from .bundle_metadata import (  # noqa: PLC0415 — import cycle
+            BundleMetadata as _BundleMetadata,
+        )
+        from .required_bundle import required_bundles_of  # noqa: PLC0415 — import cycle
 
         stored: BundleMetadata | None = vars(cls).get(METADATA_ATTRIBUTE)
         if stored is None:

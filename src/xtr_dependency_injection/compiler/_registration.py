@@ -170,7 +170,7 @@ def box_type(index: int) -> type:
 
     def body(namespace: dict[str, object]) -> None:
         # The synthesized class's own constructor.
-        def __init__(self: object, value: object) -> None:  # noqa: N807
+        def __init__(self: object, value: object) -> None:  # noqa: N807 — a constructor
             object.__setattr__(self, "value", value)
 
         namespace["__slots__"] = ("value",)
@@ -252,7 +252,7 @@ def decorating_factory(
     def unbox(kwargs: dict[str, object]) -> dict[str, object]:
         boxed = kwargs.pop(_INNER_BOX_PARAMETER)
         # The box is a synthesized class the checker cannot see.
-        kwargs[inner_parameter] = cast("object", getattr(boxed, "value"))  # noqa: B009
+        kwargs[inner_parameter] = cast("object", getattr(boxed, "value"))  # noqa: B009 — a synthesized class
         return kwargs
 
     return _wrap(factory, signature.replace(parameters=parameters), provides, unbox, _identity)

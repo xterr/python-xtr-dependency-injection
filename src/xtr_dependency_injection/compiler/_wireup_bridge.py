@@ -55,7 +55,7 @@ def is_registered(container: AsyncContainer, service: type, qualifier: Hashable 
     wireup's registry to answer without side effects.
     """
     # Wireup has no public predicate; see the docstring.
-    return container._registry.is_type_with_qualifier_known(service, qualifier)  # noqa: SLF001
+    return container._registry.is_type_with_qualifier_known(service, qualifier)  # noqa: SLF001 — no public predicate
 
 
 def parameters_of(container: AsyncContainer) -> Mapping[str, object]:

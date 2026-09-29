@@ -136,8 +136,10 @@ async def test_the_env_resolver_reads_the_environment(monkeypatch: pytest.Monkey
 async def test_the_service_resolver_without_an_open_scope_says_so() -> None:
     resolve = provider("service", Service, None)
 
-    with pytest.raises(FastapiIntegrationError, match="no kernel serves this application"):
+    with pytest.raises(FastapiIntegrationError, match="no request scope is open") as raised:
         _ = await resolve()
+
+    assert "setup(app, kernel)" in raised.value.reason
 
 
 @pytest.mark.anyio
@@ -173,5 +175,5 @@ async def test_the_scope_exits_and_the_resolvers_reset_when_the_body_raises() ->
     with pytest.raises(RuntimeError, match="boom"):
         await resolve_then_raise()
 
-    with pytest.raises(FastapiIntegrationError, match="no kernel serves this application"):
+    with pytest.raises(FastapiIntegrationError, match="no request scope is open"):
         _ = await resolve()
