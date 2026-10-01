@@ -62,6 +62,9 @@ from xtr_dependency_injection.exception import (
 )
 from xtr_dependency_injection.exception._naming import key_name as _naming_key_name
 from xtr_dependency_injection.exception._naming import qualified_name
+from xtr_dependency_injection.runtime.service_locator_injectables import (
+    service_locator_injectables,
+)
 from xtr_dependency_injection.scan.default_excludes import DEFAULT_EXCLUDES
 from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 
@@ -444,6 +447,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     )
     ordered = emission_order(assembly.state.store.entries(), assembly.state.forwards)
     injectables = emit_injectables(ordered, assembly.decorations, core.resetter.track)
+    injectables.extend(service_locator_injectables(ordered))
     return Prepared(
         core=core,
         report=report,

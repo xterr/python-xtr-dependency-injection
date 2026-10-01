@@ -90,6 +90,17 @@ reportUnknownArgumentType = "none"
 reportUnknownVariableType = "none"
 reportUnknownMemberType = "none"
 
+# The ServiceLocator[T] synthesizer builds a factory per parameterized type and
+# wraps whatever the container yields, so its type argument and product are
+# unknowable statically — the same honest Any the compiler synthesis takes.
+[[tool.basedpyright.executionEnvironments]]
+root = "src/xtr_dependency_injection/runtime/service_locator_injectables.py"
+reportAny = "none"
+reportExplicitAny = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+
 # A bundle's hook signatures name the configurators it is handed, and those
 # import NoConfig back. The imports are TYPE_CHECKING-only, so no cycle exists
 # at runtime — only in the static graph.

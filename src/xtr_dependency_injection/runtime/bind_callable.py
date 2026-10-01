@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, cast
 import wireup
 
 from xtr_dependency_injection.compiler._wireup_bridge import (
+    mark_bare_locator_injections,
     parameter_injections,
     to_engine_signature,
 )
@@ -104,7 +105,9 @@ def bind_callable(
         msg = "bind_callable needs a kernel-provided container"
         raise InvalidArgumentTypeError(msg)
     engine = container._engine()  # noqa: SLF001 — the binder owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
-    declared = signature if signature is not None else _signature_of(target)
+    declared = mark_bare_locator_injections(
+        signature if signature is not None else _signature_of(target)
+    )
     presented = to_engine_signature(declared)
     resolved_names = parameter_injections(declared)
     is_class = isinstance(target, type)

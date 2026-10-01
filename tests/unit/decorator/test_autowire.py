@@ -21,6 +21,7 @@ from xtr_dependency_injection.decorator.autowire import (
 )
 from xtr_dependency_injection.decorator.target import Target
 from xtr_dependency_injection.exception import InvalidArgumentError
+from xtr_dependency_injection.runtime.service_locator import ServiceLocator
 
 try:
     from fastapi.params import Depends as FrameworkDependency
@@ -175,6 +176,7 @@ def test_target_beside_a_parameter_or_variable_injection_is_refused(marker: Auto
 
 OptionalInjected: TypeAlias = Injected[int] | None
 OptionalTargeted: TypeAlias = Annotated[int, Target("smtp")] | None
+OptionalLocator: TypeAlias = ServiceLocator[int] | None
 MARKED: list[object] = [
     Injected[int],
     Annotated[int, Autowire(param="kernel.name")],
@@ -183,6 +185,10 @@ MARKED: list[object] = [
     Annotated[int, "other", Target("smtp")],
     OptionalInjected,
     OptionalTargeted,
+    ServiceLocator[int],
+    Injected[ServiceLocator[int]],
+    Annotated[ServiceLocator[int], "other"],
+    OptionalLocator,
 ]
 UNMARKED: list[object] = [int, int | None, Annotated[int, "other"], "Injected[int]"]
 

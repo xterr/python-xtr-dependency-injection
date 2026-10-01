@@ -98,11 +98,17 @@ def is_container_supplied(annotation: object) -> bool:
 
     True for ``Injected[T]``, ``Annotated[T, Autowire(...)]`` and
     ``Annotated[T, Target(...)]`` — also as a member of a union, such as
-    ``Injected[T] | None``. A library that calls a user's callable — a command, a
-    message handler — asks this to tell the parameters it passes itself from the
-    ones the container fills, so every such library agrees on what a marker is.
+    ``Injected[T] | None``. Also true for a bare ``ServiceLocator[T]``, which the
+    container fills with a lazy name-keyed map of the services of ``T`` without a
+    marker, the way it fills a bare ``Sequence[T]`` or ``Mapping[Hashable, T]``. A
+    library that calls a user's callable — a command, a message handler — asks
+    this to tell the parameters it passes itself from the ones the container
+    fills, so every such library agrees on what a marker is.
     """
-    return any(_marks_injection(member) for member in _union_members(annotation))
+    return any(
+        _marks_injection(member) or _is_service_locator(member)
+        for member in _union_members(annotation)
+    )
 
 
 def _union_members(annotation: object) -> tuple[object, ...]:
@@ -122,3 +128,33 @@ def _marks_injection(annotation: object) -> bool:
         return False
     metadata = cast("tuple[object, ...]", get_args(annotation))[1:]
     return any(isinstance(entry, (Autowire, Target)) for entry in metadata)
+
+
+def _is_service_locator(annotation: object) -> bool:
+    """Return whether ``annotation`` is a ``ServiceLocator[T]``, ``Annotated`` wrapper aside.
+
+    The container fills such a parameter without a marker; ``ServiceLocator`` is
+    imported here, lazily, to keep the decorator layer free of a runtime import.
+    """
+    from xtr_dependency_injection.runtime.service_locator import (  # noqa: PLC0415 — avoid an import cycle
+        ServiceLocator,
+    )
+
+    inner = annotation
+    if get_origin(inner) is Annotated:
+        inner = cast("tuple[object, ...]", get_args(inner))[0]
+    return inner is ServiceLocator or get_origin(inner) is ServiceLocator
+
+
+def bare_service_locator(annotation: object) -> bool:
+    """Return whether the container fills ``annotation`` as an unmarked ``ServiceLocator[T]``.
+
+    True for a bare ``ServiceLocator[T]`` — one no ``Autowire`` or ``Target``
+    names — and false once a marker does, since the engine-signature rewrite
+    already carries those. A caller that injects into a bound callable marks a
+    bare locator itself, because the engine fills only marked parameters there.
+    """
+    members = _union_members(annotation)
+    return any(_is_service_locator(member) for member in members) and not any(
+        _marks_injection(member) for member in members
+    )

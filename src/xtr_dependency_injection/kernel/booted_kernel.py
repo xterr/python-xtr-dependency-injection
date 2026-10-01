@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast, final
 import wireup
 
 from xtr_dependency_injection.compiler._wireup_bridge import (
+    mark_bare_locator_injections,
     parameter_injections,
     to_engine_signature,
 )
@@ -123,7 +124,7 @@ def _prepare_for_engine(
     injected from a parameter or the environment has its placeholders
     resolved by ``resolver`` first, so the wrapper is then async.
     """
-    original = inspect.signature(fn, eval_str=True)
+    original = mark_bare_locator_injections(inspect.signature(fn, eval_str=True))
     rewritten = to_engine_signature(original)
     if rewritten is original:
         return fn

@@ -775,6 +775,55 @@ def middleware_locator(container: ContainerInterface) -> ServiceLocator[Middlewa
 `locator.provided_services()` and `async for name, svc in locator` all work; an unknown name
 raises `UnknownLocatorKeyError` (a `LookupError`).
 
+#### Injecting a `ServiceLocator[T]`
+
+`ServiceLocator[T]` is an injectable parameter type in its own right, the lazy sibling of
+`Mapping[Hashable, T]`: declare it and receive a locator over the tagged services of `T` —
+same collection rules (aliasing, `@as_tagged_item(index=...)`, qualifiers), same keys a
+`Mapping[Hashable, T]` would hand you — without touching `ContainerInterface`. Nothing is
+built until `await locator.get(name)`, so a service that uses two of ten registered handlers
+builds two.
+
+```python
+@as_service
+class Dispatcher:
+    def __init__(self, handlers: ServiceLocator[Handler]) -> None:
+        self._handlers = handlers  # keys: every qualifier a Mapping[Hashable, Handler] carries
+
+    async def dispatch(self, name: str, message: Message) -> None:
+        handler = await self._handlers.get(name)  # built here, the first time
+        await handler(message)
+```
+
+A bare `ServiceLocator[T]` is container-supplied everywhere the container fills a parameter:
+a constructor, a factory parameter, a `bind_callable` target, a `@on_boot` / `@on_shutdown`
+hook, and a console command (which asks `is_container_supplied`). In a route, reach for it the
+way you reach for any container service — through a marker, `Injected[ServiceLocator[T]]` — so
+the framework knows to resolve it and it stays out of the OpenAPI schema (see
+[FastAPI](#fastapi)):
+
+```python
+@app.get("/dispatch/{name}")
+async def dispatch(name: str, handlers: Injected[ServiceLocator[Handler]]) -> Response: ...
+```
+
+`is_container_supplied(ServiceLocator[T])` is `True`, so a library calling a user's callable
+treats it as container-supplied.
+
+A locator resolves each entry in the scope its consumer was resolved in. A locator over
+singleton-only members is a singleton and resolves from the root; one over any `scoped` or
+`transient` member follows that lifetime and resolves from the scope its consumer lives in —
+so a scoped consumer's locator reaches that consumer's scoped services, while a singleton
+consumer cannot ask for a scoped-membered locator at all, refused at build with the same scope
+error `container.get` gives. A locator you build yourself over the root container and a
+`scoped` key raises that error, from `get`, when the key is asked for.
+
+A type nothing registers yields an **empty** locator (`len(locator) == 0`), where an empty
+`Mapping[Hashable, T]` is simply not injectable — the one place the two differ. A service that
+is itself one of the `T`s can take a `ServiceLocator[T]` of them all, its own key included:
+because resolution is lazy nothing is built at construction, so no build cycle forms, and
+`await locator.get(own_key)` hands back the same instance.
+
 ### `bind_callable`
 
 Returns an async function that calls a handler, a command or any callable with its
@@ -1090,12 +1139,12 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 | Conditional removal | `@remove_if_missing(service= / class_= / package=)` | Drop a service when a peer is absent |
 | Decoration | `@as_decorator(T, priority=, on_invalid=OnInvalid.*)` + `Annotated[T, AutowireDecorated()]` | Wrap a service and receive the original |
 | Parameter and target injection | `Autowire(param=...)` / `Target(name)` | Inject a parameter, or select a qualified service |
-| Tag collections | `Sequence[T]` / `Mapping[Hashable, T]` / `ServiceLocator` | Inject every tagged service, eagerly or lazily |
+| Tag collections | `Sequence[T]` / `Mapping[Hashable, T]` / `ServiceLocator[T]` | Inject every tagged service — eagerly, or lazily by name |
 | Reset between messages | `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")` | Rebind stateful services per message |
 | Lifecycle | `async Bundle.boot()` / `async Bundle.shutdown()` reading `self.container`; `@on_boot` / `@on_shutdown` | Async startup and cleanup |
 | Unit of work | `unit_of_work(container)` / `current_unit_of_work()` | One scope shared by everything done for one piece of work |
 | Container access | `xtr_service_contracts.ContainerInterface` — kernel-provided | Get / has by type plus qualifier, plus named parameters |
-| Lazy service map | `xtr_dependency_injection.ServiceLocator` | A `Mapping[Hashable, T]` that builds entries on demand |
+| Lazy service map | `xtr_dependency_injection.ServiceLocator[T]` | An injectable `Mapping[Hashable, T]` that builds each entry on demand, in the consumer's scope |
 | Diagnostics | `CompiledKernel.report`, `debug:*` commands | Inspect bundles, configs, definitions, scan |
 
 ### How our API behaves

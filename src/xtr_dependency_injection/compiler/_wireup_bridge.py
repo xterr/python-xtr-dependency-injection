@@ -21,7 +21,7 @@ from wireup.ioc.registry import _function_get_unwrapped_return_type
 from wireup.ioc.type_analysis import analyze_type
 
 from xtr_dependency_injection.config.env_placeholder import env_parameter
-from xtr_dependency_injection.decorator.autowire import Autowire
+from xtr_dependency_injection.decorator.autowire import Autowire, bare_service_locator
 from xtr_dependency_injection.decorator.target import Target
 from xtr_dependency_injection.exception import InvalidArgumentError, InvalidArgumentTypeError
 
@@ -38,6 +38,7 @@ __all__ = [
     "built_type",
     "is_registered",
     "key_type",
+    "mark_bare_locator_injections",
     "parameter_injections",
     "parameters_of",
     "to_engine_signature",
@@ -160,6 +161,28 @@ def _merge_target(metadata: list[object]) -> list[object]:
         )
         raise InvalidArgumentError(msg)
     return [entry for entry in metadata if not isinstance(entry, Autowire)]
+
+
+def mark_bare_locator_injections(signature: inspect.Signature) -> inspect.Signature:
+    """Return ``signature`` with every bare ``ServiceLocator[T]`` parameter given an ``Autowire()``.
+
+    The engine fills only marked parameters when injecting into a bound callable
+    — a command, a handler, a hook — so a bare ``ServiceLocator[T]`` there needs
+    a marker a class or factory would not. Marking it with ``Autowire()`` before
+    :func:`to_engine_signature` runs lets the same rewrite carry it to the
+    engine, and leaves a signature without one untouched.
+    """
+    parameters = list(signature.parameters.values())
+    changed = False
+    for index, parameter in enumerate(parameters):
+        if bare_service_locator(cast("object", parameter.annotation)):
+            annotated: Any = Annotated
+            wrapped = cast("object", annotated[(parameter.annotation, Autowire())])
+            parameters[index] = parameter.replace(annotation=wrapped)
+            changed = True
+    if not changed:
+        return signature
+    return signature.replace(parameters=parameters)
 
 
 def parameter_injections(signature: inspect.Signature) -> tuple[str, ...]:
