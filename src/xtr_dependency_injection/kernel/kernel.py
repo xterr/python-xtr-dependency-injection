@@ -609,8 +609,8 @@ def _package_dir(package: str | ModuleType) -> Path:
     if isinstance(package, ModuleType):
         location = package.__file__
     else:
-        spec = importlib.util.find_spec(package)
-        location = spec.origin if spec is not None else None
+        found = importlib.util.find_spec(package)
+        location = found.origin if found is not None else None
     if location is None:
         return Path.cwd()
     return Path(location).resolve().parent

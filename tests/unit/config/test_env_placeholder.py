@@ -58,7 +58,7 @@ class Pair(NamedTuple):
     right: object
 
 
-def test_one_spec_makes_one_placeholder() -> None:
+def test_one_expression_and_cast_makes_one_placeholder() -> None:
     assert env("HOST") is env("HOST")
     assert env("HOST") is not env("HOST", default="x")
 

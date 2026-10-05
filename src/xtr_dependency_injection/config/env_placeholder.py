@@ -176,7 +176,7 @@ class _OpaquePlaceholder(EnvPlaceholder):
 
 
 _REGISTRY: dict[str, EnvPlaceholder] = {}
-"""Every placeholder made in this process, by token — the same spec always gets one token."""
+"""Every placeholder made in this process, by token — one token per expression and cast."""
 
 _BY_DIGEST: dict[str, EnvPlaceholder] = {}
 """The same placeholders, by the digest ending their token."""
@@ -193,7 +193,7 @@ def placeholder(
     cast: Callable[..., object] | None = None,
     default: object = MISSING,
 ) -> EnvPlaceholder:
-    """Return the placeholder for ``expression``, made once per spec.
+    """Return the placeholder for ``expression``, made once per expression and cast.
 
     The placeholder's runtime type follows the outermost processor prefix:
     ``int:`` makes an ``int``, ``float:`` a ``float``, no prefix or a string
@@ -201,7 +201,7 @@ def placeholder(
     opaque placeholder.
     """
     # A qualified name does not identify a callable (every lambda of a module
-    # shares one), so the cast's identity is part of the spec. The registry
+    # shares one), so the cast's identity is part of the key. The registry
     # keeps the cast alive, so its id is never reused while the entry exists.
     cast_identity = "" if cast is None else f"{qualified_name(cast)}#{id(cast)}"
     digest = hashlib.blake2b(
