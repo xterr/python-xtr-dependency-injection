@@ -61,7 +61,7 @@ when an application installed the package and never listed it. Advertising activ
 
 ```toml
 [project.optional-dependencies]
-di = ["xtr-dependency-injection>=2.0,<3"]
+di = ["xtr-dependency-injection>=3.0,<4"]
 
 [project.entry-points."xtr_dependency_injection.bundles"]
 mail = "acme_mail.bundle:MailBundle"
