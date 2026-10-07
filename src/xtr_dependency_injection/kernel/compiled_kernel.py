@@ -74,7 +74,8 @@ class CompiledKernel:
         """Boot every bundle in order, then run the application's ``@on_boot`` hooks.
 
         If a step raises, what already booted is shut down in reverse, the
-        container is closed, and the error propagates.
+        container is closed, and the error propagates — carrying a note when
+        that rollback failed too, so the first failure stays the one raised.
 
         Raises:
             KernelAlreadyBootedError: If this compiled kernel booted before.
@@ -83,19 +84,26 @@ class CompiledKernel:
             raise KernelAlreadyBootedError
         self._booted = True
         booted: list[AnyBundle] = []
+        booting: AnyBundle | None = None
         try:
             for bundle in self._bundles:
                 # Give each bundle the container before its boot runs, so boot code can use it.
+                booting = bundle
                 bundle.container = self.container
                 await bundle.boot()
                 booted.append(bundle)
+                booting = None
             for hook in self._on_boot:
                 _ = await call_injected(self._engine, hook)
         except BaseException as error:
+            if booting is not None:
+                # It never joined the booted ones, so the rollback below skips
+                # it: take back the container this loop handed it.
+                booting.container = None
             partial = BootedKernel(self._engine, self._info, booted, ())
             try:
                 await partial.shutdown()
-            except ExceptionGroup as cleanup:
+            except BaseException as cleanup:  # noqa: BLE001 — noted, never raised in place of the boot failure.
                 error.add_note(f"shutting down after the failed boot also failed: {cleanup!r}")
             raise
         return BootedKernel(self._engine, self._info, self._bundles, self._on_shutdown)

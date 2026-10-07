@@ -82,7 +82,8 @@ embedded in a string: `InvalidParameterTypeError`.
 
 `env()` returns a **placeholder**, never a value. The variable is read when a service needing it
 is built, so the container compiles without the environment it will run in, and no report prints
-a secret.
+an `env()` value. A secret written straight into a config, not through `env()`, is printed as it
+stands; keep it behind `env()` or hide it in the config's `__repr__`.
 
 What this means for a bundle:
 

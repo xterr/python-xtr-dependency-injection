@@ -21,7 +21,15 @@ if TYPE_CHECKING:
 __all__ = ["IS_DEPENDENCY", "DependencyBase", "set_dependency"]
 
 IS_DEPENDENCY: Final = importlib.util.find_spec("fastapi") is not None
-"""Whether the web framework is importable, decided once at import."""
+"""Whether the web framework is importable, decided once at import.
+
+When true, the markers subclass the web framework's own dependency type so a
+route resolves them through the container. That couples them to an internal
+of the framework — the base class the markers inherit, and the attributes a
+dependency carries — so the ``fastapi`` extra pins a version range known to
+expose it; a framework release that moves that internal is caught by this
+package's contract tests, not by an application.
+"""
 
 if TYPE_CHECKING or not IS_DEPENDENCY:
 

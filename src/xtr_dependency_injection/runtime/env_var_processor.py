@@ -11,7 +11,8 @@ Prefix             Value
 =================  ==========================================================
 ``string``         the raw string (the prefix when none is given)
 ``bool``/``not``   ``1/true/yes/on`` or a non-zero number is true; ``not`` negates
-``int``/``float``  a number; anything else is an error
+``int``            an integer: optional sign then digits, nothing else
+``float``          a number; anything else is an error
 ``trim``           the string with surrounding whitespace removed
 ``base64``         decoded base64 (URL-safe characters accepted)
 ``urlencode``      percent-encoded
@@ -23,13 +24,21 @@ Prefix             Value
 ``file``           the content of the file the variable names
 ``key:K:``         item ``K`` of the mapping (or list) what follows produces
 ``enum:C:``        member of enum ``C`` (``module.Class``) for the value
-``const:``         the ``module.NAME`` attribute the value names
+``const:``         the ``module.NAME`` attribute the expression names
 ``default:P:``     what follows, or parameter ``P`` when unset or empty
                    (``None`` when ``P`` is empty)
 ``defined``        whether the variable is set and not empty
-``resolve``        ``%parameter%`` references replaced by their values
+``resolve``        ``%parameter%`` and ``%env(...)%`` references in the value
+                   replaced by their values
 ``shuffle``        the list what follows produces, shuffled
 =================  ==========================================================
+
+An expression is source-controlled configuration; a value is not. So the
+``%env(...)%`` references ``resolve:`` finds *inside* a value may only use
+the prefixes in :data:`_VALUE_PREFIXES` — those that read the variable they
+name and convert its text, and nothing else. A value cannot steer the
+processor into importing a module, reading a file, reaching a parameter or
+recursing.
 """
 
 from __future__ import annotations
@@ -92,10 +101,22 @@ _PROVIDED: Final = MappingProxyType(
 )
 _TRUE: Final = frozenset({"1", "true", "on", "yes"})
 _NUMBER: Final = re.compile(r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
+_INTEGER: Final = re.compile(r"[+-]?\d+")
 _PARAMETER: Final = re.compile(r"%%|%([^%\s]+)%")
 _SCALAR_PREFIXES: Final = frozenset(
-    {"string", "bool", "not", "int", "float", "const", "base64", "trim", "resolve", "urlencode"}
+    {"string", "bool", "not", "int", "float", "base64", "trim", "resolve", "urlencode"}
 )
+_VALUE_PREFIXES: Final = frozenset(
+    {"string", "bool", "not", "int", "float", "trim", "base64", "urlencode", "defined"}
+)
+"""The prefixes a ``%env(...)%`` reference found inside a value may use.
+
+Each one reads the variable it names and converts its text. None of them
+imports (``const``, ``enum``), opens a file (``file``), reads a parameter
+(``default``) or resolves another expression (``resolve``, ``key``,
+``shuffle``) — so a value, which the process environment or a secret store
+supplies, cannot decide what the processor reaches for.
+"""
 
 
 @final
@@ -142,6 +163,8 @@ class EnvVarProcessor(EnvVarProcessorInterface):
     def get_env(self, prefix: str, name: str, get_env: Callable[[str], object]) -> object:  # noqa: PLR0911 — the prefixes reading more than the variable, one each.
         if prefix == "key":
             return self._key(name, get_env)
+        if prefix == "const":
+            return self._const(name)
         if prefix == "enum":
             return self._enum(name, get_env)
         if prefix == "defined":
@@ -168,11 +191,17 @@ class EnvVarProcessor(EnvVarProcessorInterface):
         if prefix in {"bool", "not"}:
             value = _boolean(env)
             return not value if prefix == "not" else value
-        if prefix in {"int", "float"}:
+        if prefix == "float":
             if isinstance(env, bool) or not _NUMBER.fullmatch(text.strip()):
                 raise InvalidEnvironmentVariableError(name, prefix, text)
-            number = float(text)
-            return number if prefix == "float" else int(number)
+            return float(text)
+        if prefix == "int":
+            if isinstance(env, bool):
+                raise InvalidEnvironmentVariableError(name, prefix, text)
+            digits = text.strip()
+            if not _INTEGER.fullmatch(digits):
+                raise InvalidEnvironmentVariableError(name, prefix, text)
+            return int(digits)
         if prefix == "resolve":
             return _PARAMETER.sub(lambda match: self._parameter_text(name, match, get_env), text)
         convert = _TEXT_CONVERSIONS.get(prefix)
@@ -211,26 +240,43 @@ class EnvVarProcessor(EnvVarProcessorInterface):
             mapping = cast("Mapping[object, object]", container)
             if key in mapping:
                 return mapping[key]
-        elif isinstance(container, Sequence) and not isinstance(container, str):
+        elif isinstance(container, Sequence) and not isinstance(container, (str, bytes, bytearray)):
             items = container
-            if key.lstrip("-").isdigit() and -len(items) <= int(key) < len(items):
+            if not _INTEGER.fullmatch(key):
+                # A list is read by position: a name is a mistake about the
+                # shape of the value, not an item that happens to be absent.
+                raise InvalidEnvironmentVariableError(rest, "key", repr(container))
+            if -len(items) <= int(key) < len(items):
                 return items[int(key)]
         else:
             raise InvalidEnvironmentVariableError(rest, "key", repr(container))
         raise MissingEnvironmentVariableError(f"{rest}[{key}]")
 
+    def _const(self, name: str) -> object:
+        """Return the ``module.NAME`` attribute the expression names.
+
+        The dotted target is read from the expression itself, as ``enum:``
+        reads its class — never from a variable's value, so a value cannot
+        redirect which attribute is imported. ``resolve:`` keeps that true
+        for the ``%env(...)%`` references it finds in a value: it refuses
+        this prefix there (see :data:`_VALUE_PREFIXES`).
+        """
+        return _import(name, "const")
+
     def _enum(self, name: str, get_env: Callable[[str], object]) -> object:
         path, separator, rest = name.partition(":")
         if not separator:
             raise EnvPlaceholderError(f"enum:{name}", "enum: needs a class and a variable")
-        enum = _import(rest, path)
+        enum = _import(path, "enum")
         if not (isinstance(enum, type) and issubclass(enum, Enum)):
             raise EnvPlaceholderError(f"enum:{name}", f"{path} is not an Enum")
         value = get_env(rest)
         try:
             return enum(value)
-        except ValueError as error:
-            raise InvalidEnvironmentVariableError(rest, enum.__qualname__, str(value)) from error
+        except ValueError:
+            # ``from None``: the enum's error quotes the value, which may be a
+            # secret; the typed error keeps it in ``value``, off the message.
+            raise InvalidEnvironmentVariableError(rest, enum.__qualname__, str(value)) from None
 
     def _default(self, name: str, get_env: Callable[[str], object]) -> object:
         fallback, separator, rest = name.partition(":")
@@ -260,18 +306,57 @@ class EnvVarProcessor(EnvVarProcessorInterface):
             return "%"
         reference = match.group(1)
         if reference.startswith("env(") and reference.endswith(")") and reference != "env()":
-            value = get_env(reference[4:-1])
+            expression = reference[4:-1]
+            self._refuse_steered_expression(name, expression)
+            value = get_env(expression)
         else:
             value = self._parameter(f"resolve:{name}", reference)
         if not isinstance(value, (str, int, float, bool)):
             raise InvalidEnvironmentVariableError(name, "resolve", repr(value))
         return str(value)
 
+    def _refuse_steered_expression(self, name: str, expression: str) -> None:
+        """Refuse a ``%env(...)%`` in a value that would do more than read and convert text.
+
+        Every prefix of the chain is checked, not just the outermost: an
+        allowed prefix resolves the rest of the expression through the same
+        processors, so ``int:const:...`` would import just as ``const:...``
+        does.
+
+        Raises:
+            EnvPlaceholderError: Naming the refused prefix. The expression
+                itself comes from the value, so only the prefix is quoted.
+        """
+        rest = expression
+        while ":" in rest:
+            prefix, _, rest = rest.partition(":")
+            if prefix not in _VALUE_PREFIXES:
+                allowed = ", ".join(sorted(_VALUE_PREFIXES))
+                reason = (
+                    f"an %env(...)% reference in its value may not use the {prefix!r} prefix;"
+                    f" there it is limited to {allowed}"
+                )
+                raise EnvPlaceholderError(f"resolve:{name}", reason)
+
     def _file(self, name: str, env: object) -> str:
-        path = Path(str(env))
-        if not path.is_file():
-            raise InvalidEnvironmentVariableError(name, "file", str(path))
-        return path.read_text()
+        """Return the text of the file the variable names, read as UTF-8.
+
+        The path comes from source-controlled configuration, not from
+        untrusted input: the variable names a file the application chose to
+        read, so the processor opens it directly rather than guarding against
+        a path it was never meant to accept.
+
+        A file that cannot be read, or that is not UTF-8, is refused the same
+        way: a typed error naming the variable, never the operating system's
+        own, whose message quotes the path.
+        """
+        try:
+            return Path(str(env)).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            # ``from None``: the underlying error quotes the path — which is
+            # the variable's value, and may be a secret; the typed error keeps
+            # it in ``value``, off the message.
+            raise InvalidEnvironmentVariableError(name, "file", str(env)) from None
 
 
 def _boolean(env: object) -> bool:
@@ -294,18 +379,33 @@ def _base64(name: str, text: str) -> str:
     padded = normalized + "=" * (-len(normalized) % 4)
     try:
         return base64.b64decode(padded, validate=True).decode()
-    except (binascii.Error, UnicodeDecodeError) as error:
+    except binascii.Error as error:
+        # The decoder's complaint is about the shape of the text, not its
+        # content, so it is safe to chain and useful to read.
         raise InvalidEnvironmentVariableError(name, "base64", text) from error
+    except UnicodeDecodeError:
+        # ``from None``: the decoder names the byte it choked on, which is a
+        # byte of the decoded value and may be part of a secret.
+        raise InvalidEnvironmentVariableError(name, "base64", text) from None
 
 
 def _json(name: str, text: str) -> object:
     try:
         decoded = cast("object", json.loads(text))
-    except json.JSONDecodeError as error:
-        raise InvalidEnvironmentVariableError(name, "json", text) from error
+    except json.JSONDecodeError:
+        # ``from None``: the decoder quotes the text around where it stopped,
+        # which is part of the value and may be a secret. The value is elided
+        # for the same reason — a document decodes as a whole or not at all,
+        # so keeping it would put the entire secret on the error.
+        raise InvalidEnvironmentVariableError(name, "json", _elided(text)) from None
     if decoded is None or isinstance(decoded, (dict, list)):
         return cast("object", decoded)
-    raise InvalidEnvironmentVariableError(name, "json (an object, an array or null)", text)
+    raise InvalidEnvironmentVariableError(name, "json (an object, an array or null)", _elided(text))
+
+
+def _elided(text: str) -> str:
+    """Return a stand-in naming ``text``'s length, never its content."""
+    return f"<{len(text)} characters>"
 
 
 def _url(name: str, text: str) -> dict[str, object]:
@@ -324,12 +424,18 @@ def _url(name: str, text: str) -> dict[str, object]:
     }
 
 
-def _import(name: str, path: str) -> object:
+def _import(path: str, prefix: str) -> object:
+    """Return the attribute the dotted ``path`` names, imported for ``prefix``.
+
+    Raises:
+        InvalidEnvironmentVariableError: Naming ``path`` and the prefix that
+            asked for it — the expression's own words, never a value's.
+    """
     module, _, attribute = path.rpartition(".")
     try:
         return cast("object", getattr(importlib.import_module(module), attribute))
     except (ImportError, AttributeError, ValueError) as error:
-        raise InvalidEnvironmentVariableError(name, "const", path) from error
+        raise InvalidEnvironmentVariableError(path, prefix, path) from error
 
 
 def _csv(_name: str, text: str) -> list[str]:
@@ -346,7 +452,6 @@ _TEXT_CONVERSIONS: Final[Mapping[str, Callable[[str, str], object]]] = MappingPr
         "trim": lambda _name, text: text.strip(),
         "urlencode": lambda _name, text: quote(text, safe=""),
         "base64": _base64,
-        "const": _import,
         "json": _json,
         "csv": _csv,
         "url": _url,

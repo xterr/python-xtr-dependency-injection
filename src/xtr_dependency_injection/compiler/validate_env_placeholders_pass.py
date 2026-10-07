@@ -5,7 +5,12 @@ would otherwise surface on first use. The pass fails the build instead on:
 
 - a prefix no processor provides (``env("itn:PORT")``);
 - a placeholder embedded in a longer string whose outer prefix produces
-  something other than a string, number or bool (``f"x{env('json:X')}"``).
+  nothing a string can hold (``f"x{env('json:X')}"``).
+
+A prefix that *may* produce a string, number or bool — ``const:``, which
+reads whatever a module holds, ``key:``, ``default:`` — is allowed to be
+embedded: whether the value really is one is only knowable once the variable
+is read, and resolution refuses it then, naming what it turned out to be.
 
 Arguments of ``key:``, ``enum:`` and ``default:`` are skipped: in
 ``key:host:json:DSN``, ``host`` is a key, not a prefix.
@@ -60,10 +65,11 @@ class ValidateEnvPlaceholdersPass:
             for held in env_placeholders_embedded_in(value):
                 outer = _outer_prefix(held.expression)
                 declared = set(types.get(outer, "string").split("|"))
-                if held.cast is not None or not declared <= _EMBEDDABLE:
+                if held.cast is not None or declared.isdisjoint(_EMBEDDABLE):
                     reason = (
                         f"it is embedded in a string, but {outer!r} produces "
-                        f"{'|'.join(sorted(declared))}: only strings, numbers and bools can be"
+                        f"{'|'.join(sorted(declared))}: only strings, numbers and bools can be "
+                        "embedded in a string"
                     )
                     raise EnvPlaceholderError(held.expression, reason)
 

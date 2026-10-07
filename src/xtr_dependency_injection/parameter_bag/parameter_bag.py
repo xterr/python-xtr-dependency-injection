@@ -61,6 +61,8 @@ class ParameterBag(ParameterBagInterface):
     @override
     def clear(self) -> None:
         self._parameters.clear()
+        # Whatever is added next has not been resolved, whoever had been.
+        self._resolved = False
 
     @override
     def add(self, parameters: Mapping[str, object], /) -> None:
@@ -113,6 +115,16 @@ class ParameterBag(ParameterBagInterface):
     def is_resolved(self) -> bool:
         """Return whether :meth:`resolve` has run."""
         return self._resolved
+
+    def mark_resolved(self) -> None:
+        """Declare the parameters resolved without walking them again.
+
+        For a caller that put already-resolved values in — the compiler pass
+        that resolves every source, then replaces the bag's contents with the
+        result — so a later reference reads the value instead of resolving it
+        a second time.
+        """
+        self._resolved = True
 
     @override
     def resolve_value(self, value: object, /) -> object:

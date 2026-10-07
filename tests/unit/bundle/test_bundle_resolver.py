@@ -155,6 +155,20 @@ def test_a_missing_required_with_ignore_on_invalid_is_skipped() -> None:
     assert skipped[0].qualname == "no_such_module_xyz:MissingBundle"
 
 
+def test_a_skipped_requirement_records_what_the_import_said() -> None:
+    # Without the import's own words the report cannot tell a package that is
+    # not installed from one whose module raises as it is imported.
+    resolved = resolve_bundles(
+        core=CoreBundle(),
+        listed={WithOptionalMissingBundle: {"all": True}},
+        env="dev",
+    )
+
+    (skipped,) = [report for report in resolved.reports if report.state == "skipped"]
+    assert skipped.reason is not None
+    assert "no_such_module_xyz" in skipped.reason
+
+
 def test_a_required_bundle_inherits_the_requirers_activity() -> None:
     # Beta is listed but disabled in prod; alpha requires beta and is activated in prod.
     # Because the requirer (alpha) is active, beta becomes active too.
@@ -219,8 +233,10 @@ def test_only_active_bundle_classes_are_instantiated() -> None:
     assert [type(bundle).metadata().name for bundle in resolved.bundles] == ["kernel"]
 
 
-def test_a_listed_bundle_raising_when_active_is_refused() -> None:
-    with pytest.raises(BundleDefinitionError, match="cannot be built"):
+def test_a_listed_bundle_raising_in_its_constructor_surfaces_that_error() -> None:
+    # An error raised inside __init__ is the bundle's own, not an arity
+    # failure: it must surface, not be masked as "cannot be built".
+    with pytest.raises(RuntimeError, match="do not build me"):
         _ = _resolve({RaisesOnInit: {"all": True}})
 
 

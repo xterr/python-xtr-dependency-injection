@@ -181,8 +181,8 @@ def test_add_compiler_pass_registers_a_pass_in_the_build_phase() -> None:
         Early(), stage=PassStage.AFTER_REMOVING, priority=7
     )
 
-    (added,) = state.compiler.get_pass_config().get_after_removing_passes()
-    assert isinstance(added, Early)
+    added = [p for p in state.compiler.get_pass_config().get_passes() if isinstance(p, Early)]
+    assert len(added) == 1
 
 
 def test_the_kernel_bundle_registers_its_passes() -> None:

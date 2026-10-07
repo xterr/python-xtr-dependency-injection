@@ -52,8 +52,13 @@ def test_an_unknown_prefix_in_a_parameter_is_refused() -> None:
 
 @pytest.mark.parametrize(
     "embedded",
-    [lambda: f"x{env('json:X')}", lambda: f"x{env('PATH', str.split)}"],
-    ids=["array", "callable"],
+    [
+        lambda: f"x{env('json:X')}",
+        lambda: f"x{env('PATH', str.split)}",
+        lambda: f"x{env('enum:a.B:X')}",
+        lambda: f"x{env('shuffle:csv:X')}",
+    ],
+    ids=["array", "callable", "enum", "shuffle"],
 )
 def test_a_placeholder_that_is_no_scalar_cannot_be_embedded(
     embedded: Callable[[], object],
@@ -62,6 +67,17 @@ def test_a_placeholder_that_is_no_scalar_cannot_be_embedded(
 
     with pytest.raises(EnvPlaceholderError, match="embedded in a string"):
         _process(Config(value))
+
+
+@pytest.mark.parametrize(
+    "expression",
+    ["const:a.NAME", "default:app.x:HOST", "key:host:json:DSN"],
+    ids=["const", "default", "key"],
+)
+def test_a_prefix_that_may_produce_a_scalar_can_be_embedded(expression: str) -> None:
+    # Whether the value really is a scalar is only knowable once it is read;
+    # resolution refuses it then, naming what it turned out to be.
+    _process(Config(f"x{env(expression)}"))
 
 
 def test_an_unknown_prefix_in_a_definition_argument_is_refused() -> None:

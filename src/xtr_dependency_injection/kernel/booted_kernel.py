@@ -79,6 +79,7 @@ class BootedKernel:
             await _attempt(failures, lambda hook=hook: call_injected(self._engine, hook))
         for bundle in reversed(self._bundles):
             await _attempt(failures, lambda bundle=bundle: bundle.shutdown())
+            bundle.container = None
         await _attempt(failures, self._engine.close)
         errors = [failure for failure in failures if isinstance(failure, Exception)]
         if len(errors) < len(failures):

@@ -132,3 +132,23 @@ def test_a_list_given_to_the_bag_stays_the_callers() -> None:
     hosts.append("b")
 
     assert bag.get("hosts") == ["a"]
+
+
+def test_clearing_the_bag_forgets_that_it_was_resolved() -> None:
+    bag = _bag()
+    bag.resolve()
+
+    bag.clear()
+
+    assert not bag.is_resolved()
+
+
+def test_parameters_added_after_a_clear_are_resolved() -> None:
+    bag = _bag()
+    bag.resolve()
+    bag.clear()
+
+    bag.add({"kernel": {"project_dir": "/opt"}, "app": {"log_dir": "%kernel.project_dir%/log"}})
+    bag.resolve()
+
+    assert bag.get("app.log_dir") == "/opt/log"

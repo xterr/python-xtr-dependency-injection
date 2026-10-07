@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import base64
 import re
+import sys
+import traceback
 from enum import Enum
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from tests.fixtures.import_witness import WITNESSED
 from xtr_dependency_injection.exception import (
     EnvPlaceholderError,
     InvalidEnvironmentVariableError,
@@ -22,6 +25,7 @@ if TYPE_CHECKING:
     from xtr_dependency_injection.runtime.env_var_loader_interface import EnvVarLoaderInterface
 
 LIMIT = 42
+_WITNESSED_MODULE = "tests.fixtures.witnessed_module"
 
 
 class Level(Enum):
@@ -64,7 +68,9 @@ def _get(expression: str, **environ: str) -> object:
         ("bool:VAR", "maybe", False),
         ("not:VAR", "true", False),
         ("int:VAR", "42", 42),
-        ("int:VAR", "4.9", 4),
+        ("int:VAR", "  42  ", 42),
+        ("int:VAR", "9007199254740993", 9007199254740993),
+        ("int:VAR", "1" + "0" * 400, 10**400),
         ("float:VAR", "1e3", 1000.0),
         ("trim:VAR", "  x \n", "x"),
         ("urlencode:VAR", "a b/c", "a%20b%2Fc"),
@@ -74,7 +80,7 @@ def _get(expression: str, **environ: str) -> object:
         ("csv:VAR", 'a,"b,c",d', ["a", "b,c", "d"]),
         ("csv:VAR", "", []),
         ("query_string:VAR", "a=1&b=x&b=y", {"a": "1", "b": "y"}),
-        ("const:VAR", f"{__name__}.LIMIT", 42),
+        (f"const:{__name__}.LIMIT", "ignored", 42),
         ("key:a:json:VAR", '{"a": 7}', 7),
         ("key:1:csv:VAR", "x,y", "y"),
         (f"enum:{__name__}.Level:VAR", "low", Level.LOW),
@@ -83,6 +89,12 @@ def _get(expression: str, **environ: str) -> object:
 )
 def test_each_prefix_produces_its_value(expression: str, raw: str, expected: object) -> None:
     assert _get(expression, VAR=raw) == expected
+
+
+def test_const_takes_its_target_from_the_expression_not_a_variable_value() -> None:
+    # The dotted target is named in the expression itself; a variable named by
+    # the same text is never read, so a value there cannot redirect the import.
+    assert _get(f"const:{__name__}.LIMIT", **{f"{__name__}.LIMIT": "os.getcwd"}) == 42
 
 
 def test_url_splits_into_its_parts() -> None:
@@ -105,6 +117,42 @@ def test_file_reads_the_file_the_variable_names(tmp_path: Path) -> None:
     _ = secret.write_text('{"token": "t"}')
 
     assert _get("key:token:json:file:PATH", PATH=str(secret)) == "t"
+
+
+def test_a_file_that_cannot_be_read_never_leaks_its_path_through_the_traceback(
+    tmp_path: Path,
+) -> None:
+    # The path is the variable's value, so it may be the secret itself.
+    # Referenced by name below, so it never appears inline on a traceback frame.
+    sensitive = "s3cret-value"
+    missing = tmp_path / "absent" / sensitive
+
+    with pytest.raises(InvalidEnvironmentVariableError) as caught:
+        _ = _get("file:PATH", PATH=str(missing))
+
+    formatted = "".join(traceback.format_exception(caught.value))
+    assert sensitive not in formatted
+    assert caught.value.value == str(missing)
+
+
+def test_a_file_that_is_not_utf_8_is_refused(tmp_path: Path) -> None:
+    binary = tmp_path / "secret"
+    _ = binary.write_bytes(b"\xf0token")
+
+    with pytest.raises(InvalidEnvironmentVariableError, match="file"):
+        _ = _get("file:PATH", PATH=str(binary))
+
+
+def test_base64_of_bytes_that_are_not_utf_8_keeps_them_out_of_the_traceback() -> None:
+    # The decoder names the byte it choked on, which is a byte of the decoded value.
+    encoded = base64.urlsafe_b64encode(b"\xf0token").decode()
+
+    with pytest.raises(InvalidEnvironmentVariableError) as caught:
+        _ = _get("base64:VAR", VAR=encoded)
+
+    formatted = "".join(traceback.format_exception(caught.value))
+    assert "0xf0" not in formatted
+    assert caught.value.value == encoded
 
 
 def test_shuffle_keeps_every_item() -> None:
@@ -186,7 +234,7 @@ def test_the_live_process_environment_is_read_without_an_explicit_one(
         ("json:VAR", "1", InvalidEnvironmentVariableError, "an object, an array or null"),
         ("base64:VAR", "@@", InvalidEnvironmentVariableError, "base64"),
         ("url:VAR", "no-scheme", InvalidEnvironmentVariableError, "scheme and host"),
-        ("const:VAR", "no.such.CONSTANT", InvalidEnvironmentVariableError, "const"),
+        ("const:no.such.CONSTANT", None, InvalidEnvironmentVariableError, "const"),
         ("file:VAR", "/no/such/file", InvalidEnvironmentVariableError, "valid file"),
         ("key:z:json:VAR", '{"a": 1}', MissingEnvironmentVariableError, "json:VAR[z]"),
         ("key:9:csv:VAR", "a", MissingEnvironmentVariableError, "csv:VAR[9]"),
@@ -196,6 +244,10 @@ def test_the_live_process_environment_is_read_without_an_explicit_one(
         (f"enum:{__name__}.LIMIT:VAR", "low", EnvPlaceholderError, "is not an Enum"),
         ("enum:VAR", "x", EnvPlaceholderError, "needs a class"),
         ("default:VAR", "x", EnvPlaceholderError, "default:PARAM:NAME"),
+        ("int:VAR", "4.9", InvalidEnvironmentVariableError, "int"),
+        ("int:VAR", "0x1f", InvalidEnvironmentVariableError, "int"),
+        ("int:VAR", "1_0", InvalidEnvironmentVariableError, "int"),
+        ("int:VAR", "+-1", InvalidEnvironmentVariableError, "int"),
         ("int:json:VAR", "[1]", InvalidEnvironmentVariableError, "int"),
         ("shuffle:VAR", "a", InvalidEnvironmentVariableError, "shuffle"),
         ("nope:VAR", "x", EnvPlaceholderError, "unsupported env var prefix 'nope'"),
@@ -223,6 +275,69 @@ def test_resolve_refuses_a_non_scalar_parameter() -> None:
 
     with pytest.raises(InvalidEnvironmentVariableError, match="resolve"):
         _ = locator.get_env("resolve:VAR")
+
+
+@pytest.mark.parametrize(
+    ("embedded", "refused"),
+    [
+        (f"const:{_WITNESSED_MODULE}.MARKER", "const"),
+        (f"enum:{_WITNESSED_MODULE}.MARKER:VAR", "enum"),
+        (f"int:const:{_WITNESSED_MODULE}.MARKER", "const"),
+        ("file:OTHER", "file"),
+        ("default:app.fallback:OTHER", "default"),
+        ("resolve:OTHER", "resolve"),
+        ("key:0:csv:OTHER", "key"),
+    ],
+)
+def test_resolve_refuses_a_prefix_a_value_may_not_steer(embedded: str, refused: str) -> None:
+    # The expression is source-controlled, its value is not: a variable holding
+    # "%env(const:...)%" would otherwise import whatever module it names.
+    locator = _locator({"VAR": f"prefix-%env({embedded})%"}, parameters={"app.fallback": "x"})
+
+    with pytest.raises(EnvPlaceholderError, match=re.escape(repr(refused))):
+        _ = locator.get_env("resolve:VAR")
+
+    assert WITNESSED == []
+    assert _WITNESSED_MODULE not in sys.modules
+
+
+def test_resolve_still_replaces_the_prefixes_a_value_may_use() -> None:
+    locator = _locator({"DSN": "%env(trim:HOST)%:%env(int:PORT)%", "HOST": " mx ", "PORT": "25"})
+
+    assert locator.get_env("resolve:DSN") == "mx:25"
+
+
+def test_an_enum_class_that_cannot_be_imported_names_the_class_and_the_prefix() -> None:
+    with pytest.raises(InvalidEnvironmentVariableError) as caught:
+        _ = _get("enum:no.such.Level:VAR", VAR="low")
+
+    assert caught.value.name == "no.such.Level"
+    assert caught.value.cast == "enum"
+
+
+def test_a_sequence_read_with_a_name_instead_of_an_index_is_refused() -> None:
+    with pytest.raises(InvalidEnvironmentVariableError, match="key"):
+        _ = _get("key:host:csv:VAR", VAR="a,b")
+
+
+def test_bytes_are_not_a_sequence_a_key_can_read() -> None:
+    processor = EnvVarProcessor({})
+
+    with pytest.raises(InvalidEnvironmentVariableError, match="key"):
+        _ = processor.get_env("key", "0:RAW", lambda _name: b"ab")
+
+
+def test_json_that_cannot_be_decoded_keeps_neither_the_text_nor_the_decoders_complaint() -> None:
+    # The decoder's message quotes where it stopped, and the text is the value.
+    truncated = '{"token": "s3cr3t"'
+
+    with pytest.raises(InvalidEnvironmentVariableError) as caught:
+        _ = _get("json:VAR", VAR=truncated)
+
+    formatted = "".join(traceback.format_exception(caught.value))
+    assert "s3cr3t" not in formatted
+    assert "s3cr3t" not in caught.value.value
+    assert caught.value.__cause__ is None
 
 
 def test_the_processor_provides_every_documented_prefix() -> None:

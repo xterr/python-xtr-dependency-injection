@@ -84,7 +84,7 @@ class ScanResult:
 class Scanner:
     """Scans resources for one build: early, then late, never finding an object twice."""
 
-    __slots__ = ("_env", "_exclude", "_order", "_seen", "modules", "skipped")
+    __slots__ = ("_env", "_exclude", "_module_names", "_order", "_seen", "modules", "skipped")
 
     def __init__(self, *, env: str, exclude: Sequence[str]) -> None:
         """Scan for ``env``, leaving out modules matching the ``exclude`` patterns."""
@@ -93,6 +93,7 @@ class Scanner:
         self._seen: set[int] = set()
         self._order = 0
         self.modules: list[str] = []
+        self._module_names: set[str] = set()
         self.skipped: list[tuple[str, str]] = []
 
     def scan(
@@ -125,7 +126,8 @@ class Scanner:
             yield from self._walk(root)
 
     def _walk(self, module: ModuleType) -> Iterator[ModuleType]:
-        if module.__name__ not in self.modules:
+        if module.__name__ not in self._module_names:
+            self._module_names.add(module.__name__)
             self.modules.append(module.__name__)
         yield module
         path = cast("list[str] | None", getattr(module, "__path__", None))

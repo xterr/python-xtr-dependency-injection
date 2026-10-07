@@ -67,7 +67,7 @@ reportMissingParameterType = "error"
 reportPrivateUsage = "error"
 
 # wireup exposes no public accessor for its return-type keying rule; the
-# bridge wraps that gap in one place so nothing else has to (§9.4 of the plan).
+# bridge wraps that gap in one place so nothing else has to.
 # Any/Unknown flags mirror the compiler-wide relaxation below because more
 # specific execution environments replace, not merge.
 [[tool.basedpyright.executionEnvironments]]

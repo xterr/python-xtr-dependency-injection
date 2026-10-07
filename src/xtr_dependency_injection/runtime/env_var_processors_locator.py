@@ -41,7 +41,10 @@ class EnvVarProcessorsLocator:
             prefix, local = "string", name
         processor = self._processors.get(prefix)
         if processor is None:
-            raise EnvPlaceholderError(name, f"unsupported env var prefix {prefix!r}")
+            known = ", ".join(sorted(self.prefixes()))
+            raise EnvPlaceholderError(
+                name, f"unsupported env var prefix {prefix!r}; the prefixes are {known}"
+            )
         return processor.get_env(prefix, local, self.get_env)
 
     def prefixes(self) -> tuple[str, ...]:

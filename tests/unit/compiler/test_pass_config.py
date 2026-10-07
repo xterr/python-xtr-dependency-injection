@@ -54,8 +54,6 @@ def test_the_built_in_passes_are_in_place() -> None:
     ]
     assert config.get_before_removing_passes() == []
     assert _names(config.get_removing_passes()) == ["ReplaceAliasByActualDefinitionPass"]
-    assert config.get_after_removing_passes() == []
-    assert config.get_merge_pass() is None
 
 
 def test_a_pass_runs_by_priority_then_after_the_passes_already_at_its_priority() -> None:

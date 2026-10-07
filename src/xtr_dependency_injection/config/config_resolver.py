@@ -140,6 +140,14 @@ def resolve_configs(
                 edges=alias_edges,
                 pending=pending_alias,
             )
+    # Every target resolves after all its forwarders, so the queue drains; a
+    # leftover means a forward was dropped — the bug this guards against.
+    if pending_alias:  # pragma: no cover — invariant guard; the order above drains the queue.
+        targets = ", ".join(sorted(pending_alias))
+        raise ConfigProviderError(
+            f"alias_of forwards into {targets}",
+            "they were never consumed: their target bundles resolved before them",
+        )
     skipped = (
         *(
             (
@@ -320,20 +328,24 @@ def _resolution_order(
     names = [type(bundle).metadata().name for bundle in bundles]
     position = {name: index for index, name in enumerate(names)}
     owners: dict[str, set[str]] = {name: set() for name in names}
+    targets: dict[str, set[str]] = {name: set() for name in names}
     for owner, target, _, _ in edges:
         owners[target].add(owner)
+        targets[owner].add(target)
     order: list[AnyBundle] = []
     ready = [index for index, name in enumerate(names) if not owners[name]]
     heapq.heapify(ready)
+    # One owner may forward into one target through several fields, yet it is
+    # one dependency: the target waits for the owner once, not once per field,
+    # or it resolves before another forwarder and drops that forward silently.
     waiting = {name: len(forwarders) for name, forwarders in owners.items()}
     while ready:
         index = heapq.heappop(ready)
         order.append(bundles[index])
-        for owner, target, _, _ in edges:
-            if owner == names[index]:
-                waiting[target] -= 1
-                if waiting[target] == 0:
-                    heapq.heappush(ready, position[target])
+        for target in targets[names[index]]:
+            waiting[target] -= 1
+            if waiting[target] == 0:
+                heapq.heappush(ready, position[target])
     if len(order) < len(bundles):
         stuck = {name for name, count in waiting.items() if count > 0}
         raise CircularBundleDependencyError(_alias_cycle(owners, stuck))

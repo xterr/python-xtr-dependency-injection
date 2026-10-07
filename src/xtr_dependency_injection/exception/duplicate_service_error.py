@@ -20,7 +20,7 @@ class DuplicateServiceError(DependencyInjectionError):
 
     The application overrides a bundle silently; two bundles, or two
     application definitions, never do — unless a bundle calls
-    ``builder.replace`` on purpose.
+    ``builder.set_definition`` on purpose.
     """
 
     key: tuple[type, Hashable | None]

@@ -74,10 +74,14 @@ PUBLIC = {
     "one_or_many",
     "unit_of_work",
     "current_unit_of_work",
+    "__version__",
+    "BUNDLE_PASS_PRIORITY",
+    "sort_with_priorities",
+    "ScopeFactoryInterface",
 }
 
 
-def test_the_public_api_is_exactly_what_the_plan_lists() -> None:
+def test_the_public_api_is_exactly_what_is_declared() -> None:
     assert set(xtr_dependency_injection.__all__) == PUBLIC
 
 

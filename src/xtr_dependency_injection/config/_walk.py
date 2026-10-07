@@ -72,22 +72,38 @@ def rebuild(value: object, leaf: Callable[[object], object]) -> object:
 
     A container none of whose leaves changed (by identity) is returned as
     is; a changed mapping becomes a ``dict``, a sequence or set keeps its
-    type, a named tuple its fields.
+    type, a named tuple its fields. A container reachable from itself is left
+    as is: a cycle cannot be rebuilt, and recursing it would never end.
     """
-    if isinstance(value, Mapping):
-        return _rebuild_mapping(cast("Mapping[object, object]", value), leaf)
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return _rebuild_collection(cast("list[object]", value), leaf)
+    return _rebuild(value, leaf, set())
+
+
+def _rebuild(value: object, leaf: Callable[[object], object], seen: set[int]) -> object:
     if isinstance(value, (str, bytes, int, float, type(None))):
         return leaf(value)
-    names = _field_names(value)
-    if not names:
-        return leaf(value)
-    return _rebuild_fields(value, names, leaf)
+    # A path-keyed guard, added on the way down and dropped on the way up, so a
+    # shared child reached twice is rebuilt twice while a true cycle stops here.
+    identity = id(value)
+    if identity in seen:
+        return value
+    seen.add(identity)
+    try:
+        if isinstance(value, Mapping):
+            return _rebuild_mapping(cast("Mapping[object, object]", value), leaf, seen)
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return _rebuild_collection(cast("list[object]", value), leaf, seen)
+        names = _field_names(value)
+        if not names:
+            return leaf(value)
+        return _rebuild_fields(value, names, leaf, seen)
+    finally:
+        seen.discard(identity)
 
 
-def _rebuild_mapping(mapping: Mapping[object, object], leaf: Callable[[object], object]) -> object:
-    items = [(rebuild(k, leaf), rebuild(v, leaf)) for k, v in mapping.items()]
+def _rebuild_mapping(
+    mapping: Mapping[object, object], leaf: Callable[[object], object], seen: set[int]
+) -> object:
+    items = [(_rebuild(k, leaf, seen), _rebuild(v, leaf, seen)) for k, v in mapping.items()]
     if all(a is k and b is v for (a, b), (k, v) in zip(items, mapping.items(), strict=True)):
         return mapping
     return dict(items)
@@ -96,8 +112,9 @@ def _rebuild_mapping(mapping: Mapping[object, object], leaf: Callable[[object], 
 def _rebuild_collection(
     value: list[object] | tuple[object, ...] | set[object] | frozenset[object],
     leaf: Callable[[object], object],
+    seen: set[int],
 ) -> object:
-    items = [rebuild(item, leaf) for item in value]
+    items = [_rebuild(item, leaf, seen) for item in value]
     if all(new is old for new, old in zip(items, value, strict=True)):
         return value
     if isinstance(value, tuple) and hasattr(value, "_fields"):  # a named tuple
@@ -107,12 +124,12 @@ def _rebuild_collection(
 
 
 def _rebuild_fields(
-    value: object, names: tuple[str, ...], leaf: Callable[[object], object]
+    value: object, names: tuple[str, ...], leaf: Callable[[object], object], seen: set[int]
 ) -> object:
     changed = {
         name: new
         for name in names
-        if (new := rebuild(old := cast("object", getattr(value, name)), leaf)) is not old
+        if (new := _rebuild(old := cast("object", getattr(value, name)), leaf, seen)) is not old
     }
     if not changed:
         return value

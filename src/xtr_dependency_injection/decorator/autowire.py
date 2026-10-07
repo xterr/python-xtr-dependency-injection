@@ -26,9 +26,10 @@ presented to the engine.
 
 from __future__ import annotations
 
+import typing
 from dataclasses import dataclass
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, TypeVar, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Final, TypeVar, cast, get_args, get_origin
 
 from xtr_dependency_injection.exception import InvalidArgumentError
 
@@ -39,6 +40,9 @@ if TYPE_CHECKING:
     from typing import TypeAlias
 
 __all__ = ["Autowire", "Injected", "is_container_supplied"]
+
+_TYPING_UNION: Final = typing.Union  # pyright: ignore[reportDeprecated] — not an annotation.
+"""``Optional[T]``'s origin before Python 3.14 folds it into ``types.UnionType``."""
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -115,10 +119,10 @@ def _union_members(annotation: object) -> tuple[object, ...]:
     """Return what ``annotation`` may be: its members if a union, else itself.
 
     ``X | None`` has the origin ``UnionType``; ``Optional[X]`` has ``typing.Union``
-    until Python 3.14 makes them one — compared by name, as naming it is deprecated.
+    until Python 3.14 makes them one, each matched by identity.
     """
     origin = get_origin(annotation)
-    if origin is UnionType or str(origin) == "typing.Union":
+    if origin is UnionType or origin is _TYPING_UNION:
         return cast("tuple[object, ...]", get_args(annotation))
     return (annotation,)
 

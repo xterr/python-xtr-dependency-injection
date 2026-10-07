@@ -9,7 +9,7 @@ plain wireup ``AsyncContainer``: this package decides *what* goes into it, in
 
 from __future__ import annotations
 
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from .builder import Decorates, Definition, Origin, ServiceKey
 from .builder.bundle_active import bundle_active
@@ -17,6 +17,7 @@ from .builder.container_builder import ContainerBuilder
 from .builder.named_factory import named_factory
 from .builder.service_configurator import ServiceConfigurator
 from .bundle import Bundle, BundleMetadata, NoConfig, RequiredBundle, as_bundle, required_bundle
+from .compiler.before_after_sorter import sort_with_priorities
 from .compiler.compiler_pass_interface import CompilerPassInterface
 from .compiler.pass_stage import PassStage
 from .config import AliasOf, configure, env, one_or_many, parameters
@@ -43,14 +44,16 @@ from .decorator import (
 )
 from .diagnostics import KernelReport
 from .exception import FastapiIntegrationError
-from .exception._naming import qualified_name
+from .exception.qualified_name import qualified_name
 from .kernel import BootedKernel, CompiledKernel, Kernel, KernelInterface
+from .kernel.kernel import BUNDLE_PASS_PRIORITY
 from .parameter_bag import ContainerBagInterface, ParameterBagInterface
 from .runtime import (
     EnvVarLoaderInterface,
     EnvVarProcessor,
     EnvVarProcessorInterface,
     Reference,
+    ScopeFactoryInterface,
     ServiceLocator,
     ServicesResetter,
     bind_callable,
@@ -61,6 +64,7 @@ from .runtime import (
 from .scan import DEFAULT_EXCLUDES
 
 __all__ = [
+    "BUNDLE_PASS_PRIORITY",
     "DEFAULT_EXCLUDES",
     "AliasOf",
     "Autowire",
@@ -89,11 +93,13 @@ __all__ = [
     "PassStage",
     "Reference",
     "RequiredBundle",
+    "ScopeFactoryInterface",
     "ServiceConfigurator",
     "ServiceKey",
     "ServiceLocator",
     "ServicesResetter",
     "Target",
+    "__version__",
     "as_alias",
     "as_bundle",
     "as_decorator",
@@ -118,9 +124,15 @@ __all__ = [
     "qualified_name",
     "remove_if_missing",
     "required_bundle",
+    "sort_with_priorities",
     "unit_of_work",
     "when",
     "when_not",
 ]
 
-__version__ = version("xtr-dependency-injection")
+try:
+    __version__ = version("xtr-dependency-injection")
+except PackageNotFoundError:  # pragma: no cover
+    # Running from a source tree with no installed metadata to read; having no
+    # version is better than refusing to import.
+    __version__ = "0+unknown"

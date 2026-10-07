@@ -4,7 +4,11 @@
 a service that needs it is built, through the container's environment
 variable processors. The build only carries the placeholder around, so a
 container compiles without the environment it will run in, a service nobody
-builds never reads its variables, and no report ever prints a secret.
+builds never reads its variables, and no report prints an ``env()`` value —
+a placeholder renders as its token, never the variable it stands for. A secret
+written straight into a config or a definition argument, not through
+``env()``, is printed as it stands; keep such values behind ``env()``, or give
+the config a ``__repr__`` that hides them.
 
 A placeholder is an instance of the type it stands for where Python allows
 it — an ``int``, ``float`` or ``str`` — so a config's own validation still
@@ -19,6 +23,14 @@ cannot decide what the container contains now.
 Resolution walks a value — a placeholder, a string holding tokens, a mapping,
 a sequence, a dataclass, a msgspec ``Struct`` or a pydantic model — and
 rebuilds only what holds a placeholder.
+
+A token carries a per-process salted digest, so a string from outside this
+process cannot name a placeholder it was never handed. The variable *names*
+inside an expression (``PORT`` in ``int:PORT``, a ``%parameter%`` reference,
+``default:PARAM:NAME``) are trusted source-controlled configuration, not
+untrusted input: they decide which variable or parameter is read, so an
+application must never build an ``env()`` expression or a parameter reference
+out of a request.
 """
 
 from __future__ import annotations
@@ -116,8 +128,10 @@ class EnvPlaceholder:
             return value
         try:
             return self.cast(value)
-        except (TypeError, ValueError) as error:
-            raise InvalidEnvironmentVariableError(self.expression, self.cast, str(value)) from error
+        except (TypeError, ValueError):
+            # ``from None``: the cast's own error quotes the value, which may
+            # be a secret; the typed error keeps it in ``value``, off the message.
+            raise InvalidEnvironmentVariableError(self.expression, self.cast, str(value)) from None
 
     def __bool__(self) -> bool:
         """Refuse: a placeholder has no truth value until it is resolved.

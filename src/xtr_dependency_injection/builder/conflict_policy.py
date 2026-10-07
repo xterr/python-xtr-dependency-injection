@@ -6,7 +6,7 @@ origins instead of a bare duplicate:
 - the application over a bundle: the application wins, silently, and the
   report records the override;
 - bundle against bundle: an error, unless it goes through
-  ``builder.replace``;
+  ``builder.set_definition``;
 - application against application: an error;
 - application against the kernel: an error — kernel services are not
   app-overridable.

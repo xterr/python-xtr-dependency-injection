@@ -117,14 +117,6 @@ class PassConfig:
         """Return the ``REMOVE`` passes in the order they run."""
         return _sorted(self._passes[PassStage.REMOVE])
 
-    def get_after_removing_passes(self) -> list[CompilerPassInterface]:
-        """Return the ``AFTER_REMOVING`` passes in the order they run."""
-        return _sorted(self._passes[PassStage.AFTER_REMOVING])
-
-    def get_merge_pass(self) -> CompilerPassInterface | None:
-        """Return the pass that loads the bundles' extensions, run before every stage."""
-        return self._merge_pass
-
     def set_merge_pass(self, compiler_pass: CompilerPassInterface) -> None:
         """Set the pass that loads the bundles' extensions."""
         self._merge_pass = compiler_pass

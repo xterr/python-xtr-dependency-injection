@@ -1,4 +1,4 @@
-"""The layering of §5 and the wireup import rule of §9.4, read from every module's AST."""
+"""The package's layering and its wireup import rule, read from every module's AST."""
 
 from __future__ import annotations
 

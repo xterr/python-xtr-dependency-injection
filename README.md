@@ -302,6 +302,11 @@ contributing no services. `installed_bundles()`, from `xtr_dependency_injection.
 returns them — importing each, so call it from a diagnostic, never from a build. A target that
 cannot be imported, or is not an `@as_bundle` class, is skipped.
 
+The kernel bundle is the one exception: this package never advertises it under the entry point
+group. It is always active and always first, built in by the kernel itself, so there is nothing
+to discover and nothing for `debug:bundles` to report as left out — advertising it would only
+invite an application to list a bundle it can neither add nor remove.
+
 ## Configuration
 
 Configuration is Python. A config type is a frozen dataclass or msgspec `Struct` buildable
@@ -419,8 +424,10 @@ service injects `ContainerBagInterface` to read the compiled ones.
 
 `env()` never reads a value: it returns a **placeholder**, and the variable is read when a
 service needing it is built. The container compiles without the environment it will run in,
-a service nobody builds never reads its variables, and no report prints a secret — a
-placeholder renders as `env(SMTP_PASSWORD)`.
+a service nobody builds never reads its variables, and no report prints an `env()` value — a
+placeholder renders as `env(SMTP_PASSWORD)`. A secret written straight into a config or a
+definition argument, not through `env()`, is printed as it stands; keep such values behind
+`env()`, or give the config a `__repr__` that hides them.
 
 ```python
 @configure
@@ -457,14 +464,20 @@ decide what the container contains: testing one in an `if` while the kernel buil
 |---|---|
 | *(none)* / `string` | the raw string |
 | `bool` / `not` | `1/true/yes/on` or a non-zero number is true; `not` negates |
-| `int` / `float` | a number; anything else is an error |
+| `int` | an integer: an optional sign then digits, nothing else |
+| `float` | a number; anything else is an error |
 | `trim` / `urlencode` / `base64` | stripped / percent-encoded / decoded |
 | `json` / `csv` | an object, array or null / a list |
 | `url` / `query_string` | a dict of the URL's parts / of the query |
 | `file` | the content of the file the variable names |
-| `key:K:` / `enum:C:` / `const:` | item `K` / member of enum `C` / the named constant |
+| `key:K:` / `enum:C:` / `const:P` | item `K` / member of enum `C` / the `module.NAME` constant `P` names in the expression |
 | `default:P:` | what follows, or parameter `P` when unset or empty |
 | `defined` / `resolve` / `shuffle` | set and not empty / `%param%` and `%env(X)%` replaced / shuffled list |
+
+A value is not configuration: the `%env(...)%` references `resolve` finds inside one may only
+use `string`, `bool`, `not`, `int`, `float`, `trim`, `base64`, `urlencode` and `defined`, so a
+variable's value cannot steer the processor into importing a module, reading a file or reaching
+a parameter. `%param%` references in a value are unaffected.
 
 Variables are read from the process environment — or from `Kernel(environ={...})`, which
 gives one kernel its own — then from every **loader**: a service implementing
@@ -870,6 +883,31 @@ async with unit_of_work(container) as unit:
 A library opens a unit around what it runs for one piece of work — the message bus does, per
 message — and a service that needs "the one for this unit" resolves it from
 `current_unit_of_work()`.
+
+A service that opens units of work injects `ScopeFactoryInterface` rather than the whole
+container — it gets exactly that one power, nothing else. The kernel registers it, so any
+service can take it. What it registers is `ScopeFactory`, from
+`xtr_dependency_injection.runtime`: it holds one container and forwards to
+`unit_of_work(container, join=...)`, so a test can stand one up by hand with
+`ScopeFactory(container)`. A service injects the interface, never the class:
+
+```python
+from xtr_dependency_injection import ScopeFactoryInterface, as_service
+
+
+@as_service
+class Worker:
+    def __init__(self, scopes: ScopeFactoryInterface) -> None:
+        self._scopes = scopes
+
+    async def run(self, message: object) -> None:
+        async with self._scopes.unit_of_work(join=False) as unit:  # a fresh unit per message
+            session = await unit.get(Session)
+            ...
+```
+
+`scopes.unit_of_work(join=...)` is `unit_of_work(container, join=...)` bound to the container the
+factory was built for; `join` behaves exactly as it does there.
 
 ### Helpers for bundles
 

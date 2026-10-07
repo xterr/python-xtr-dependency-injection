@@ -1,7 +1,8 @@
 """``BeforeAfterSorter``: reorder items to satisfy before/after constraints.
 
-Two entry points, :func:`sort` and :func:`sort_with_priorities`, share the
-private :func:`_visit` DFS.
+:func:`sort_with_priorities` is what the package exports; :func:`sort`, the
+same ordering without priorities, is used by it and by the compiler. Both
+share the private :func:`_visit` DFS.
 
 Items are emitted depth-first in seed order, which keeps the seed order
 intact wherever the constraints allow it. ``A before B`` and ``B after A``
@@ -22,7 +23,7 @@ from xtr_dependency_injection.exception.service_order_error import ServiceOrderE
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
-__all__ = ["sort", "sort_with_priorities"]
+__all__ = ["sort_with_priorities"]
 
 
 _INT64_MIN: Final = -(2**63)
@@ -109,10 +110,10 @@ def sort_with_priorities(  # noqa: C901, PLR0912, PLR0915 — the algorithm keep
     indexes: dict[str, int] = {item: index for index, item in enumerate(seed)}
 
     # Stable sort: priority desc, ties by original index asc (missing priority = 0).
-    seed.sort(key=lambda item: (-(priorities.get(item) or 0), indexes[item]))
+    seed.sort(key=lambda item: (-_declared_or_zero(priorities, item), indexes[item]))
 
     if not constraints:
-        return {item: (priorities.get(item) or 0) for item in seed}
+        return {item: _declared_or_zero(priorities, item) for item in seed}
 
     # detects cycles before the bounds below are computed, so that a cycle is reported as such
     _ = sort(seed, constraints, aliases)
@@ -228,6 +229,12 @@ def sort_with_priorities(  # noqa: C901, PLR0912, PLR0915 — the algorithm keep
         previous = item
 
     return {item: resolved[item] for item in sorted_items}
+
+
+def _declared_or_zero(priorities: Mapping[str, int | None], item: str) -> int:
+    """Return ``item``'s declared priority, or ``0`` when it has none."""
+    priority = priorities.get(item)
+    return 0 if priority is None else priority
 
 
 def _visit(

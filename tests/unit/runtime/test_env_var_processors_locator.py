@@ -44,6 +44,13 @@ def test_a_prefix_no_processor_provides_is_refused() -> None:
         _ = EnvVarProcessorsLocator({"string": Recording()}).get_env("upper:VAR")
 
 
+def test_a_refused_prefix_names_the_prefixes_there_are() -> None:
+    locator = EnvVarProcessorsLocator({"string": Recording(), "trim": Recording()})
+
+    with pytest.raises(EnvPlaceholderError, match="the prefixes are string, trim"):
+        _ = locator.get_env("upper:VAR")
+
+
 def test_it_lists_its_prefixes() -> None:
     recording = Recording()
 

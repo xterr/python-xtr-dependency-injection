@@ -215,6 +215,37 @@ def test_two_bundles_forwarding_to_one_target_conflict() -> None:
     assert caught.value.config_type is MailConfig
 
 
+@dataclass(frozen=True)
+class TwinConfig:
+    first: Annotated[MailConfig | None, AliasOf("mail")] = None
+    second: Annotated[MailConfig | None, AliasOf("mail")] = None
+
+
+@as_bundle("twin", config=TwinConfig)
+class TwinBundle(Bundle[TwinConfig]):
+    pass
+
+
+def test_one_bundles_twin_aliases_do_not_release_the_target_before_a_second_forwarder() -> None:
+    # The owner ``twin`` forwards two fields into ``mail`` (one None at
+    # runtime) and ``beta`` forwards one. Counting edges rather than owners
+    # once released ``mail`` after ``twin`` alone, dropping ``beta``'s
+    # forward silently; ``mail`` must wait for both, so the two live forwards
+    # collide.
+    @configure
+    def twin() -> TwinConfig:
+        return TwinConfig(first=MailConfig(host="twin"))
+
+    @configure
+    def beta() -> BetaConfig:
+        return BetaConfig(mail=MailConfig(host="beta"))
+
+    with pytest.raises(ConflictingConfigProvidersError) as caught:
+        _ = _resolve(twin, beta, bundles=(CoreBundle(), TwinBundle(), MailBundle(), BetaBundle()))
+
+    assert caught.value.config_type is MailConfig
+
+
 def test_an_alias_loop_between_two_bundles_is_a_cycle() -> None:
     with pytest.raises(CircularBundleDependencyError) as caught:
         _ = _resolve(bundles=(CoreBundle(), LoopABundle(), LoopBBundle()))

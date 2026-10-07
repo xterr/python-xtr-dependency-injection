@@ -13,7 +13,11 @@ __all__ = ["InvalidEnvironmentVariableError"]
 
 
 class InvalidEnvironmentVariableError(DependencyInjectionError):
-    """A processor or cast refused a variable's value; a cast's own error is ``__cause__``.
+    """A processor or cast refused a variable's value.
+
+    The error that refused it is ``__cause__`` only when its own message says
+    nothing about the value: one that quotes the value — or the path the value
+    names — is dropped, so a logged traceback cannot carry a secret.
 
     Attributes:
         name: The variable, or the expression being processed.

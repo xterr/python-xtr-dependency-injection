@@ -170,10 +170,10 @@ def _close_over_required(candidates: dict[str, _Candidate]) -> None:
             continue
         visited.add(requirer.metadata.name)
         for declaration in requirer.metadata.required:
-            resolved = _resolve_target(declaration, requirer)
+            resolved, failure = _resolve_target(declaration, requirer)
             if resolved is None:
                 # Skipped with ignore_on_invalid; record as a report entry.
-                _record_skipped(candidates, declaration, requirer)
+                _record_skipped(candidates, declaration, requirer, failure)
                 continue
             bundle_type = resolved
             candidate = _register_from_required(candidates, bundle_type, requirer)
@@ -186,8 +186,16 @@ def _close_over_required(candidates: dict[str, _Candidate]) -> None:
                 pending.append(candidate)
 
 
-def _resolve_target(declaration: RequiredBundle, requirer: _Candidate) -> type[AnyBundle] | None:
-    """Return the target of ``declaration``; ``None`` when ``ignore_on_invalid`` swallows it."""
+def _resolve_target(
+    declaration: RequiredBundle, requirer: _Candidate
+) -> tuple[type[AnyBundle] | None, str]:
+    """Return the target of ``declaration``, with what the import said when it failed.
+
+    The target is ``None`` only when ``ignore_on_invalid`` swallows a failed
+    import; the second element then carries the import's own words, so the
+    report can tell a package that is not installed from one whose module
+    raises as it is imported.
+    """
     target = declaration.target
     if isinstance(target, type):
         # The annotation restricts type targets to Bundle subclasses, but an
@@ -197,21 +205,21 @@ def _resolve_target(declaration: RequiredBundle, requirer: _Candidate) -> type[A
                 qualified_name(target),
                 f"required by {requirer.metadata.name}: it is not a Bundle subclass",
             )
-        return target
+        return target, ""
     module_name, _, class_name = target.partition(":")
     try:
         module = importlib.import_module(module_name)
         loaded = cast("object", getattr(module, class_name))
     except (ImportError, AttributeError) as error:
         if declaration.ignore_on_invalid:
-            return None
+            return None, str(error)
         raise MissingBundleError(target, requirer.metadata.name, str(error)) from error
     if not (isinstance(loaded, type) and issubclass(loaded, Bundle)):
         raise BundleDefinitionError(
             target,
             f"required by {requirer.metadata.name}: {target} is not a Bundle subclass",
         )
-    return cast("type[AnyBundle]", loaded)
+    return cast("type[AnyBundle]", loaded), ""
 
 
 def _register_from_required(
@@ -247,6 +255,7 @@ def _record_skipped(
     candidates: dict[str, _Candidate],
     declaration: RequiredBundle,
     requirer: _Candidate,
+    failure: str,
 ) -> None:
     """Record an ``ignore_on_invalid`` target as a skipped report entry."""
     target = declaration.target
@@ -262,7 +271,7 @@ def _record_skipped(
         source="required",
         active=False,
         state="skipped",
-        reason=f"required by {requirer.metadata.name}, missing (ignore_on_invalid)",
+        reason=f"required by {requirer.metadata.name}, missing (ignore_on_invalid): {failure}",
     )
 
 
@@ -321,7 +330,13 @@ def _instance(candidate: _Candidate, core: AnyBundle) -> AnyBundle:
         return core
     try:
         return candidate.bundle_type()
-    except Exception as error:
+    except TypeError as error:
+        # An arity failure raises at the call itself, so the traceback stops
+        # here; a TypeError raised inside __init__ has a deeper frame and is
+        # the bundle's own error, surfaced as it stands.
+        traceback = error.__traceback__
+        if traceback is not None and traceback.tb_next is not None:
+            raise
         failure = BundleDefinitionError(
             candidate.metadata.name, "the bundle class cannot be built with no arguments"
         )

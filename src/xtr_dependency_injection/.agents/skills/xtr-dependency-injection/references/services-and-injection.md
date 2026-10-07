@@ -182,6 +182,27 @@ async with unit_of_work(container) as unit:
 - A library opens a unit around one piece of work — the message bus does it per message, the
   HTTP lifecycle per request.
 
+A service that opens units injects `ScopeFactoryInterface` instead of the whole container — it
+gets just that one power. `scopes.unit_of_work(join=...)` is `unit_of_work(container, join=...)`
+bound to the container it was built for. The kernel registers `ScopeFactory` (from
+`xtr_dependency_injection.runtime`) under the interface; a test builds one by hand with
+`ScopeFactory(container)`, and a service always injects the interface.
+
+```python
+from xtr_dependency_injection import ScopeFactoryInterface, as_service
+
+
+@as_service
+class Worker:
+    def __init__(self, scopes: ScopeFactoryInterface) -> None:
+        self._scopes = scopes
+
+    async def run(self, message: object) -> None:
+        async with self._scopes.unit_of_work(join=False) as unit:
+            session = await unit.get(Session)
+            ...
+```
+
 ## Resetting between messages
 
 A service inheriting `ResetInterface` (from `xtr_service_contracts`) is reset by

@@ -31,11 +31,13 @@ from xtr_dependency_injection.parameter_bag.container_bag import ContainerBag
 from xtr_dependency_injection.parameter_bag.container_bag_interface import ContainerBagInterface
 from xtr_dependency_injection.runtime.env_var_loader_interface import EnvVarLoaderInterface
 from xtr_dependency_injection.runtime.env_var_processor_interface import EnvVarProcessorInterface
+from xtr_dependency_injection.runtime.scope_factory import ScopeFactory
+from xtr_dependency_injection.runtime.scope_factory_interface import ScopeFactoryInterface
 from xtr_dependency_injection.runtime.services_resetter import ServicesResetter
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
-# The plan names the one KernelInterface implementation _KernelInfo (§6.5);
-# this bundle is the only other module allowed to build it.
+# _KernelInfo is the one KernelInterface implementation, and this bundle is
+# the only module besides its own allowed to build it.
 from .kernel_interface import KernelInterface, _KernelInfo  # pyright: ignore[reportPrivateUsage]
 
 if TYPE_CHECKING:
@@ -61,6 +63,15 @@ def container_interface(container: AsyncContainer) -> ContainerInterface:
     keys the service under :class:`ContainerInterface`.
     """
     return WireupContainer(container)
+
+
+def scope_factory(container: ContainerInterface) -> ScopeFactoryInterface:
+    """Provide the :class:`ScopeFactoryInterface` that opens units of work on the container.
+
+    A service injects this rather than the whole container when all it needs
+    is to open a unit of work.
+    """
+    return ScopeFactory(container)
 
 
 @final
@@ -109,4 +120,5 @@ class KernelBundle(Bundle):
         services.alias(KernelInterface, _KernelInfo)
         _ = services.instance(self.resetter)
         _ = services.set(container_interface)
+        _ = services.set(scope_factory)
         _ = services.set(container_bag)

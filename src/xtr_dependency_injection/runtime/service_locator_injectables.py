@@ -27,8 +27,9 @@ error wireup gives, exactly as for ``Mapping[Hashable, T]``.
 from __future__ import annotations
 
 import inspect
+import typing
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Any, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Final, cast, get_args, get_origin
 
 import wireup
 from wireup import AsyncContainer, ScopedAsyncContainer
@@ -45,6 +46,9 @@ if TYPE_CHECKING:
 __all__ = ["service_locator_injectables"]
 
 _MODULE = "xtr_dependency_injection.runtime"
+
+_TYPING_UNION: Final = typing.Union  # pyright: ignore[reportDeprecated] — not an annotation.
+"""``Optional[T]``'s origin before Python 3.14 folds it into ``types.UnionType``."""
 
 
 def service_locator_injectables(definitions: Sequence[Definition]) -> list[object]:
@@ -66,9 +70,7 @@ def service_locator_injectables(definitions: Sequence[Definition]) -> list[objec
             lifetimes are read from them in that order.
     """
     members = _members(definitions)
-    provided_locators = {
-        key[0] for definition in definitions if _is_locator(key := definition.key)[0]
-    }
+    provided_locators = {key[0] for definition in definitions if _is_locator(key := definition.key)}
     wanted: dict[type, None] = dict.fromkeys(members)
     for requested in _requested_types(definitions):
         wanted.setdefault(requested, None)
@@ -160,17 +162,15 @@ def _union_members(annotation: object) -> tuple[object, ...]:
     """Return ``annotation``'s union members, or ``annotation`` itself when it is not one."""
     origin = get_origin(annotation)
     # ``X | None`` has the origin ``UnionType``; ``Optional[X]`` reads back as
-    # ``typing.Union`` until Python 3.14 merges them — matched by name, as
-    # naming it directly is deprecated.
-    if origin is UnionType or str(origin) == "typing.Union":
+    # ``typing.Union`` until Python 3.14 merges them — each matched by identity.
+    if origin is UnionType or origin is _TYPING_UNION:
         return cast("tuple[object, ...]", get_args(annotation))
     return (annotation,)
 
 
-def _is_locator(key: ServiceKey) -> tuple[bool, type]:
-    """Return whether ``key``'s provided type is a ``ServiceLocator[...]``, and that type."""
-    provided = key[0]
-    return get_origin(provided) is ServiceLocator, provided
+def _is_locator(key: ServiceKey) -> bool:
+    """Return whether ``key``'s provided type is a ``ServiceLocator[...]``."""
+    return get_origin(key[0]) is ServiceLocator
 
 
 def _collection_lifetime(lifetimes: Sequence[Lifetime]) -> Lifetime:

@@ -7,7 +7,11 @@ from importlib.metadata import EntryPoint
 from typing import TYPE_CHECKING
 
 from tests.support.bundles import ChorusBundle, EchoBundle
-from xtr_dependency_injection.bundle import BUNDLES_ENTRY_POINT_GROUP, installed_bundles
+from xtr_dependency_injection.bundle import (
+    BUNDLES_ENTRY_POINT_GROUP,
+    advertised_bundles,
+    installed_bundles,
+)
 
 if TYPE_CHECKING:
     import pytest
@@ -83,3 +87,29 @@ def test_it_skips_a_target_whose_module_fails_as_it_is_imported(
     _advertise(monkeypatch, broken="tests.fixtures.failing_on_import:Bundle")
 
     assert installed_bundles() == ()
+
+
+def test_an_entry_that_cannot_be_loaded_is_reported_with_what_it_said(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _advertise(
+        monkeypatch,
+        absent="xtr_no_such_module_anywhere.bundle:AbsentBundle",
+        echo="tests.support.bundles:EchoBundle",
+    )
+
+    advertised = advertised_bundles()
+
+    assert advertised.bundles == (EchoBundle,)
+    ((name, error),) = advertised.unusable
+    assert name == "absent"
+    assert "xtr_no_such_module_anywhere" in error
+
+
+def test_an_entry_that_is_not_a_bundle_is_not_reported_as_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # It loaded fine; it is simply not a bundle, which is not a failure to report.
+    _advertise(monkeypatch, plugin="tests.support.bundles:Plugin")
+
+    assert advertised_bundles().unusable == ()

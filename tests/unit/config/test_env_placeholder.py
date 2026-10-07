@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pickle
+import traceback
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -17,7 +18,10 @@ from xtr_dependency_injection.config.env_placeholder import (
     placeholder,
     resolve_env_placeholders,
 )
-from xtr_dependency_injection.exception import EnvPlaceholderError
+from xtr_dependency_injection.exception import (
+    EnvPlaceholderError,
+    InvalidEnvironmentVariableError,
+)
 
 VALUES: dict[str, object] = {
     "HOST": "db.local",
@@ -250,3 +254,18 @@ def test_a_string_without_tokens_resolves_to_itself() -> None:
     assert (
         resolve_env_placeholders("https://example.com/api", _get_env) == "https://example.com/api"
     )
+
+
+def test_a_cast_that_refuses_a_value_never_leaks_it_through_the_traceback() -> None:
+    def as_port(value: object) -> int:
+        return int(str(value))
+
+    # Referenced by name below, so it never appears inline on a traceback frame.
+    sensitive = "s3cr3t-token-value"
+    held = placeholder("SECRET", as_port)
+
+    with pytest.raises(InvalidEnvironmentVariableError) as caught:
+        _ = held.resolve(lambda _: sensitive)
+
+    formatted = "".join(traceback.format_exception(caught.value))
+    assert sensitive not in formatted

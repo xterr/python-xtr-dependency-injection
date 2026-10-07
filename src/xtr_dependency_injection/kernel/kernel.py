@@ -90,7 +90,10 @@ __all__ = [
 ]
 
 BUNDLE_PASS_PRIORITY: Final = -10000
-"""Where a bundle overriding ``process`` runs: ``BEFORE_OPTIMIZATION``, after every other pass."""
+"""Where a bundle overriding ``process`` runs: last in ``BEFORE_OPTIMIZATION``.
+
+The later stages still run after it.
+"""
 
 
 @final

@@ -23,6 +23,10 @@ def cache() -> Cache:
     return Cache()
 
 
+def optional_cache() -> Cache | None:
+    return Cache()
+
+
 def _state() -> BuildState:
     state = BuildState(env="dev", debug=False, bundles=("kernel",), configs={})
     state.phase = "process"
@@ -113,6 +117,17 @@ def test_a_short_lived_class_with_weak_references_is_valid() -> None:
     _ = (
         ServiceConfigurator(state, Origin("app", "tests"))
         .set(WeakSlottedCache, lifetime="transient")
+        .add_tag(RESET_TAG, method="clear")
+    )
+
+    _process(state)
+
+
+def test_a_factory_returning_an_optional_is_checked_against_its_non_none_member() -> None:
+    state = _state()
+    _ = (
+        ServiceConfigurator(state, Origin("app", "tests"))
+        .set(optional_cache)
         .add_tag(RESET_TAG, method="clear")
     )
 

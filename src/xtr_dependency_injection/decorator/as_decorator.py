@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import inspect
 import types
+import typing
 from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Final, TypeVar, cast, get_args, get_origin
@@ -35,7 +36,13 @@ from xtr_dependency_injection.exception._signatures import evaluated_signature
 
 from ._marker import own_marker, set_marker
 
-_UNION_ORIGINS: Final = frozenset({get_origin(int | type(None)), types.UnionType})
+_UNION_ORIGINS: Final = frozenset(
+    {
+        get_origin(int | type(None)),
+        types.UnionType,
+        typing.Union,  # pyright: ignore[reportDeprecated] — Optional[T]'s origin, not an annotation.
+    }
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -192,10 +199,10 @@ def _strip_none(annotation: object) -> tuple[object, bool]:
     """Return ``(T, allows_none)`` for ``T``, ``T | None`` or ``Optional[T]``.
 
     ``Optional[T]`` has the origin ``typing.Union`` until Python 3.14 makes it
-    ``UnionType`` — compared by name, as naming it is deprecated.
+    ``UnionType``; both are held in :data:`_UNION_ORIGINS` and matched by identity.
     """
     origin = get_origin(annotation)
-    if origin in _UNION_ORIGINS or str(origin) == "typing.Union":
+    if origin in _UNION_ORIGINS:
         args = cast("tuple[object, ...]", get_args(annotation))
         non_none = tuple(arg for arg in args if arg is not type(None))
         if len(non_none) == 1 and len(non_none) != len(args):

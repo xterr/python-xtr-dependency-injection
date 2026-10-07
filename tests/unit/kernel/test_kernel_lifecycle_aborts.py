@@ -196,3 +196,83 @@ async def test_a_boot_failure_keeps_its_error_and_notes_the_failed_rollback() ->
     (note,) = caught.value.__notes__
     assert note.startswith("shutting down after the failed boot also failed")
     assert "shutdown failed" in note
+
+
+async def test_the_container_of_the_bundle_whose_boot_failed_is_cleared() -> None:
+    # The failed bundle never joins the booted ones, so the rollback's own
+    # clean-up skips it: boot has to take back what it handed over.
+    compiled = Kernel(
+        _PACKAGE,
+        env="dev",
+        bundles={FailingBootBundle: {"all": True}},
+        resources=(),
+    ).build()
+    bundle = next(b for b in compiled._bundles if isinstance(b, FailingBootBundle))
+
+    with pytest.raises(ValueError, match="boot failed"):
+        _ = await compiled.boot()
+
+    assert bundle.container is None
+
+
+@as_bundle("res_aborts_rollback")
+class AbortingRollbackBundle(Bundle):
+    """Boots fine, then aborts the rollback with a ``BaseException``."""
+
+    @override
+    async def shutdown(self) -> None:
+        raise Abort("rollback aborted")
+
+
+@required_bundle(AbortingRollbackBundle)
+@as_bundle("res_fails_boot_after_abort")
+class FailingBootAfterAbortBundle(Bundle):
+    """Boots after ``res_aborts_rollback`` and fails."""
+
+    @override
+    async def boot(self) -> None:
+        message = "boot failed"
+        raise ValueError(message)
+
+
+async def test_a_boot_failure_keeps_its_error_when_the_rollback_is_aborted() -> None:
+    compiled = Kernel(
+        _PACKAGE,
+        env="dev",
+        bundles={FailingBootAfterAbortBundle: {"all": True}},
+        resources=(),
+    ).build()
+
+    with pytest.raises(ValueError, match="boot failed") as caught:
+        _ = await compiled.boot()
+
+    (note,) = caught.value.__notes__
+    assert "rollback aborted" in note
+
+
+@as_bundle("res_container_cleared")
+class ContainerClearedBundle(Bundle):
+    """Records its container during shutdown so the clean-up afterwards is observable."""
+
+    seen_during_shutdown: object = None
+
+    @override
+    async def shutdown(self) -> None:
+        ContainerClearedBundle.seen_during_shutdown = self.container
+
+
+async def test_a_bundles_container_is_set_during_shutdown_and_cleared_after() -> None:
+    ContainerClearedBundle.seen_during_shutdown = None
+    booted = await Kernel(
+        _PACKAGE,
+        env="dev",
+        bundles={ContainerClearedBundle: {"all": True}},
+        resources=(),
+    ).boot()
+    bundle = next(b for b in booted._bundles if isinstance(b, ContainerClearedBundle))
+    assert bundle.container is not None
+
+    await booted.shutdown()
+
+    assert ContainerClearedBundle.seen_during_shutdown is not None
+    assert bundle.container is None

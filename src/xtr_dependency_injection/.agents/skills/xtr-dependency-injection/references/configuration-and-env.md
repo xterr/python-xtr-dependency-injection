@@ -92,8 +92,10 @@ mapping embedded in a string an `InvalidParameterTypeError`.
 
 `env()` never reads a value. It returns a placeholder, and the variable is read when a
 service that needs it is built — so the container compiles without the environment it will
-run in, a service nobody builds never reads its variables, and no report prints a secret
-(`debug:config` shows `env(SMTP_PASSWORD)`).
+run in, a service nobody builds never reads its variables, and no report prints an `env()`
+value (`debug:config` shows `env(SMTP_PASSWORD)`). A secret written straight into a config,
+not through `env()`, is printed as it stands; keep it behind `env()` or hide it in the
+config's `__repr__`.
 
 ```python
 config = replace(
@@ -118,12 +120,13 @@ config = replace(
 | --- | --- |
 | *(none)* / `string` | the raw string |
 | `bool` / `not` | `1/true/yes/on` or a non-zero number is true; `not` negates |
-| `int` / `float` | a number; anything else is an error |
+| `int` | an integer: an optional sign then digits, nothing else |
+| `float` | a number; anything else is an error |
 | `trim` / `urlencode` / `base64` | stripped / percent-encoded / decoded |
 | `json` / `csv` | an object, array or null / a list |
 | `url` / `query_string` | a dict of the URL's parts / of the query |
 | `file` | the content of the file the variable names |
-| `key:K:` / `enum:C:` / `const:` | item `K` / a member of enum `C` / the named constant |
+| `key:K:` / `enum:C:` / `const:P` | item `K` / a member of enum `C` / the `module.NAME` constant `P` names in the expression |
 | `default:P:` | what follows, or parameter `P` when unset or empty |
 | `defined` / `resolve` / `shuffle` | set and not empty / `%param%` and `%env(X)%` replaced / shuffled list |
 
@@ -146,3 +149,7 @@ kernel is built.
   `ServiceResolutionError` caused by `MissingEnvironmentVariableError`.
 - Placeholders are process-wide: one per distinct `env()` expression, read through each
   kernel's own processors.
+- A value cannot steer `resolve`: the `%env(...)%` references it finds inside a variable's
+  value are limited to `string`, `bool`, `not`, `int`, `float`, `trim`, `base64`, `urlencode`
+  and `defined`, so no value can make the processor import a module (`const`, `enum`), read a
+  file (`file`) or reach a parameter (`default`). `%param%` references in a value still work.
