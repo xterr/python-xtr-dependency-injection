@@ -14,7 +14,13 @@ from tests.fixtures.app_kernel.services import Greeter
 from tests.support.bundles import ChorusBundle, EchoBundle
 from xtr_dependency_injection import Kernel, current_unit_of_work
 from xtr_dependency_injection.exception import FastapiIntegrationError
-from xtr_dependency_injection.integration.fastapi import attach, detach, provider, request_scope
+from xtr_dependency_injection.integration.fastapi import (
+    attach,
+    current_connection,
+    detach,
+    provider,
+    request_scope,
+)
 
 if TYPE_CHECKING:
     from typing import Literal
@@ -43,6 +49,11 @@ def _served_app() -> Starlette:
     app = Starlette()
     attach(app, _compiled())
     return app
+
+
+def _connection(app: Starlette) -> HTTPConnection:
+    """Build what the framework hands a resolver for a request of ``app``."""
+    return HTTPConnection({"type": "http", "app": app})
 
 
 def test_one_resolver_per_kind_key_and_qualifier() -> None:
@@ -83,7 +94,7 @@ async def test_the_service_resolver_resolves_inside_a_request_scope() -> None:
     resolve = provider("service", Greeter, None)
 
     async with request_scope(app):
-        greeter = await resolve()
+        greeter = await resolve(_connection(app))
 
     assert isinstance(greeter, Greeter)
     # The fixture kernel uppercases the greeting and decorates the echo.
@@ -103,7 +114,7 @@ async def test_a_request_is_the_unit_of_work_what_it_starts_joins() -> None:
     resolve = provider("service", AsyncSession, None)
 
     async with request_scope(app):
-        session = await resolve()
+        session = await resolve(_connection(app))
         unit = current_unit_of_work()
         assert unit is not None
         assert await unit.get(AsyncSession) is session
@@ -113,7 +124,7 @@ async def test_a_request_is_the_unit_of_work_what_it_starts_joins() -> None:
 
 @pytest.mark.anyio
 async def test_the_param_resolver_reads_the_attached_container() -> None:
-    request = HTTPConnection({"type": "http", "app": _served_app()})
+    request = _connection(_served_app())
     resolve = provider("param", "app.punctuation")
 
     value = await resolve(request)
@@ -124,7 +135,7 @@ async def test_the_param_resolver_reads_the_attached_container() -> None:
 @pytest.mark.anyio
 async def test_the_env_resolver_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XTR_FASTAPI_TEST_GREETING", "hi")
-    request = HTTPConnection({"type": "http", "app": _served_app()})
+    request = _connection(_served_app())
     resolve = provider("env", "XTR_FASTAPI_TEST_GREETING")
 
     value = await resolve(request)
@@ -137,7 +148,7 @@ async def test_the_service_resolver_without_an_open_scope_says_so() -> None:
     resolve = provider("service", Service, None)
 
     with pytest.raises(FastapiIntegrationError, match="no request scope is open") as raised:
-        _ = await resolve()
+        _ = await resolve(_connection(Starlette()))
 
     assert "setup(app, kernel)" in raised.value.reason
 
@@ -147,7 +158,7 @@ async def test_the_service_resolver_without_an_open_scope_says_so() -> None:
 async def test_a_connection_resolver_without_an_attached_kernel_says_so(
     kind: Literal["param", "env"],
 ) -> None:
-    request = HTTPConnection({"type": "http", "app": Starlette()})
+    request = _connection(Starlette())
     resolve = provider(kind, "unserved")
 
     with pytest.raises(FastapiIntegrationError, match="no kernel serves this application"):
@@ -168,7 +179,7 @@ async def test_the_scope_exits_and_the_resolvers_reset_when_the_body_raises() ->
 
     async def resolve_then_raise() -> None:
         async with request_scope(app):
-            _ = await resolve()  # the scope is open: resolution works
+            _ = await resolve(_connection(app))  # the scope is open: resolution works
             msg = "boom"
             raise RuntimeError(msg)
 
@@ -176,4 +187,80 @@ async def test_the_scope_exits_and_the_resolvers_reset_when_the_body_raises() ->
         await resolve_then_raise()
 
     with pytest.raises(FastapiIntegrationError, match="no request scope is open"):
-        _ = await resolve()
+        _ = await resolve(_connection(app))
+
+
+@pytest.mark.anyio
+async def test_a_resolver_publishes_the_connection_until_the_scope_exits() -> None:
+    app = _served_app()
+    connection = _connection(app)
+    resolve = provider("service", Greeter, None)
+
+    async with request_scope(app):
+        _ = await resolve(connection)
+
+        assert current_connection() is connection
+
+    with pytest.raises(FastapiIntegrationError, match="only be read while a request is served"):
+        _ = current_connection()
+
+
+def test_reading_the_connection_outside_a_request_says_so() -> None:
+    with pytest.raises(FastapiIntegrationError, match="can only be read") as raised:
+        _ = current_connection()
+
+    assert "a route that declared no marker" in raised.value.reason
+
+
+@pytest.mark.anyio
+async def test_a_service_resolver_that_finds_no_scope_publishes_nothing() -> None:
+    resolve = provider("service", Service, None)
+
+    with pytest.raises(FastapiIntegrationError, match="no request scope is open"):
+        _ = await resolve(_connection(Starlette()))
+
+    with pytest.raises(FastapiIntegrationError, match="can only be read"):
+        _ = current_connection()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", ["param", "env"])
+async def test_a_connection_resolver_that_finds_no_kernel_publishes_nothing(
+    kind: Literal["param", "env"],
+) -> None:
+    resolve = provider(kind, "unpublished")
+
+    with pytest.raises(FastapiIntegrationError, match="no kernel serves this application"):
+        _ = await resolve(_connection(Starlette()))
+
+    with pytest.raises(FastapiIntegrationError, match="can only be read"):
+        _ = current_connection()
+
+
+@pytest.mark.anyio
+async def test_a_nested_scope_reads_the_connection_the_outer_one_published() -> None:
+    app = _served_app()
+    outer = _connection(app)
+    resolve = provider("service", Greeter, None)
+
+    async with request_scope(app):
+        _ = await resolve(outer)
+
+        async with request_scope(app):
+            assert current_connection() is outer
+
+
+@pytest.mark.anyio
+async def test_a_nested_scope_hands_the_outer_connection_back_when_it_exits() -> None:
+    app = _served_app()
+    outer, inner = _connection(app), _connection(app)
+    resolve = provider("service", Greeter, None)
+
+    async with request_scope(app):
+        _ = await resolve(outer)
+
+        async with request_scope(app):
+            _ = await resolve(inner)
+            assert current_connection() is inner
+
+        assert current_connection() is outer

@@ -1047,9 +1047,47 @@ kernel and runs the boot hooks inside the app's lifespan. The seam it builds on 
 - `request_scope(app)` opens the container scope a request's scoped services live in, for the
   span of that request.
 - `provider(...)` derives the resolver a marker turns into.
+- `current_connection()` returns the framework's own request object for the request being
+  served — the one the body, the form and the parsed JSON are cached on — so a per-request
+  factory in an integration package can build from it and share the reads the framework has
+  already made instead of consuming the wire a second time.
 
 These exist for an entry point such as xtr-http-kernel to build on; an application uses
 `setup` and the markers, nothing lower.
+
+`current_connection()` is plumbing of that same kind, and application code does not call it. A
+service the container builds for a request is built by the container, not by the framework, so
+it cannot declare a request parameter of its own; every resolver publishes the connection the
+framework handed it before it resolves, and the function reads that one. The caller it exists
+for is a per-request factory in an integration package — [xtr-http-kernel](../xtr-http-kernel)'s
+request factory — which turns that object into the request it registers, so the request a
+service receives carries the body the framework has already read.
+
+What to reach for instead:
+
+- In a route, take the framework's own `request: Request`.
+- In a route or a service that wants the request as a message, take
+  `Injected[ServerRequestInterface]` — or a plain `ServerRequestInterface` constructor
+  parameter. That interface comes from
+  [xtr-http-message-contracts](../xtr-http-message-contracts) and is registered by
+  xtr-http-kernel. It belongs to one request, so the container refuses a singleton that depends
+  on it while it compiles: `ContainerCompilationError ... Singletons can only depend on other
+  singletons.`
+
+For anyone who calls `current_connection()` anyway, the rules it is bound by:
+
+- Only something built for one request may read it: a `lifetime="scoped"` service, a transient
+  one, or a factory of either. A singleton — the lifetime `@as_service` and `services.set` take
+  when none is given — is built once for the application's life, so it would keep the connection
+  of whichever request happened to build it and hand that stale path, those stale headers, to
+  every request after.
+- It stays readable for as long as the request's scope is open, and that outlasts the response:
+  a background task the framework runs once the response has gone out still reads the connection
+  of the request that queued it.
+- On a WebSocket route the connection is the `WebSocket` — a resolver is handed the connection
+  class a request and a socket share, whichever of the two is being served.
+- Outside a served request — in a command, in a worker, or on a route that declared no marker —
+  there is none, and it raises `FastapiIntegrationError`.
 
 A scoped service built for a request is released after the response is sent — FastAPI's own
 timing for a dependency's cleanup — so a service that opens a unit of work per request commits
@@ -1248,7 +1286,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `BuilderPhaseError` / `BuilderFrozenError` | A builder operation in the wrong phase / after compilation |
 | `KernelAlreadyBootedError` | A compiled kernel booted twice |
 | `UnknownLocatorKeyError` | `ServiceLocator.get` with an unknown name (`LookupError`) |
-| `FastapiIntegrationError` | A route resolves with no kernel attached or no open request scope, or a second kernel is attached to an application one already serves |
+| `FastapiIntegrationError` | A route resolves with no kernel attached or no open request scope, the current connection is read outside a served request, or a second kernel is attached to an application one already serves |
 
 ## Known limitations
 

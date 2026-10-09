@@ -2,7 +2,9 @@
 
 :func:`attach` stores a compiled kernel's container on the application's
 state; :func:`request_scope` opens the container scope one request's scoped
-services live in; :func:`provider` derives the resolver a marker becomes.
+services live in; :func:`provider` derives the resolver a marker becomes, and
+:func:`current_connection` reads the connection the resolvers of the request
+being served publish.
 Serving an application takes the HTTP kernel package on top: until its setup
 call attaches a kernel, a resolver that runs can only say what is missing.
 """
@@ -16,6 +18,7 @@ from xtr_dependency_injection.integration._resolvers import (
     STATE_KEY,
     AttachedKernel,
     attached_kernel,
+    current_connection,
     provider,
     request_scope,
 )
@@ -27,7 +30,7 @@ if TYPE_CHECKING:
 
     from xtr_dependency_injection.kernel.compiled_kernel import CompiledKernel
 
-__all__ = ["attach", "detach", "provider", "request_scope"]
+__all__ = ["attach", "current_connection", "detach", "provider", "request_scope"]
 
 _ALREADY_ATTACHED: Final = (
     "a kernel already serves this application: detach(app) before attaching another"

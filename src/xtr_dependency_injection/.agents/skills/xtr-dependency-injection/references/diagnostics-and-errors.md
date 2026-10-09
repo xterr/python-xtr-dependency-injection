@@ -95,7 +95,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `UnknownLocatorKeyError` | `ServiceLocator.get` with an unknown name |
 | `InvalidArgumentTypeError` / `InvalidArgumentError` | An API given the wrong kind of thing / a value it cannot use |
 | `KernelAlreadyBootedError` | A compiled kernel booted twice |
-| `FastapiIntegrationError` | A route resolved with no kernel attached, outside a request scope, or a second kernel attached to one application |
+| `FastapiIntegrationError` | A route resolved with no kernel attached, outside a request scope, the current connection read outside a served request, or a second kernel attached to one application |
 
 ## Shutdown
 

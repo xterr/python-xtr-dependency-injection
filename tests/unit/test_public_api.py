@@ -11,6 +11,7 @@ import xtr_dependency_injection
 import xtr_dependency_injection.diagnostics
 import xtr_dependency_injection.exception
 import xtr_dependency_injection.testing
+from xtr_dependency_injection.integration import fastapi as integration_fastapi
 from xtr_dependency_injection.integration import wireup as integration_wireup
 
 PUBLIC = {
@@ -80,6 +81,16 @@ PUBLIC = {
     "ScopeFactoryInterface",
 }
 
+# What the web seam exports for an entry point such as the HTTP kernel to
+# build on; an application reaches for its setup call and the markers instead.
+SEAM = {
+    "attach",
+    "current_connection",
+    "detach",
+    "provider",
+    "request_scope",
+}
+
 
 def test_the_public_api_is_exactly_what_is_declared() -> None:
     assert set(xtr_dependency_injection.__all__) == PUBLIC
@@ -88,6 +99,15 @@ def test_the_public_api_is_exactly_what_is_declared() -> None:
 def test_every_public_name_is_importable() -> None:
     for name in PUBLIC:
         assert getattr(xtr_dependency_injection, name) is not None
+
+
+def test_the_web_seam_is_exactly_what_is_declared() -> None:
+    assert set(integration_fastapi.__all__) == SEAM
+
+
+def test_every_seam_name_is_importable() -> None:
+    for name in SEAM:
+        assert getattr(integration_fastapi, name) is not None
 
 
 def test_the_version_comes_from_the_distribution() -> None:

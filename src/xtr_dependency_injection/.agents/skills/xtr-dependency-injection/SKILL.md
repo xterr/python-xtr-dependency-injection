@@ -27,6 +27,7 @@ Writing a bundle for a library is a different job: load the skill
 | Read a variable in config | `env("SMTP_HOST")`, `env("PORT", int, default=25)` |
 | Run code at startup | `@on_boot` / `@on_shutdown` |
 | Share a scope | `async with unit_of_work(container) as unit:` |
+| Read the served request | `request: Request` in a route, `Injected[ServerRequestInterface]` in a route or service |
 | Boot it | `kernel.run(main)`, `await kernel.boot()`, or `setup(app, kernel)` for HTTP |
 | Check it | `debug:bundles`, `debug:config`, `debug:container` |
 
@@ -84,6 +85,23 @@ setup(app, kernel)  # HTTP — from xtr_http_kernel
 `build()` compiles, `boot()` also runs bundle boots and `@on_boot`, `run(main)` does both and
 returns `main`'s exit code. Load `.env` files with xtr-dotenv at the entry point, before the
 kernel is built. For the HTTP side read the `xtr-http-kernel` skill.
+
+To reach the request being served, take the framework's own `request: Request` in a route, or
+`Injected[ServerRequestInterface]` — a plain `ServerRequestInterface` parameter in a service —
+for the request as a message: that interface comes from `xtr-http-message-contracts` and is
+registered by xtr-http-kernel. It belongs to one request, so the container refuses a singleton
+that depends on it while it compiles (`ContainerCompilationError ... Singletons can only depend
+on other singletons.`).
+
+`current_connection()`, from `xtr_dependency_injection.integration.fastapi`, is not for
+application code: it is the seam an integration package's per-request factory reads to get the
+framework's own request object, the one the body and the parsed form are cached on, so the
+request a service receives shares those reads. If you call it anyway: only from a
+`lifetime="scoped"` or transient service, or a factory of one — a singleton is built once for
+the application's life and would hand every later request the connection of the one that
+happened to build it. It stays readable until the request's scope closes, which is after the
+response has gone out, so a background task still reads it; on a socket route it is the
+`WebSocket`; outside a served request it raises `FastapiIntegrationError`.
 
 ## Register a service
 
