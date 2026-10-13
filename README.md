@@ -50,7 +50,7 @@ Libraries depend on it through an extra, so using them without a container costs
 
 ```toml
 [project.optional-dependencies]
-di = ["xtr-dependency-injection>=3.0,<4"]
+di = ["xtr-dependency-injection>=4.0,<5"]
 ```
 
 Serving an application over HTTP takes the `fastapi` extra, which pulls in the web framework
