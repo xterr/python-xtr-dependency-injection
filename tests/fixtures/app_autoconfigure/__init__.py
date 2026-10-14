@@ -17,7 +17,7 @@ class Buffer(ResetInterface):
         self.resets: int = 0
 
     @override
-    def reset(self) -> None:
+    async def reset(self) -> None:
         self.items.clear()
         self.resets += 1
 

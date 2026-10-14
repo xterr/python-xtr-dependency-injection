@@ -211,7 +211,7 @@ A service inheriting `ResetInterface` (from `xtr_service_contracts`) is reset by
 ```python
 @as_service
 class Catalog(ResetInterface):
-    def reset(self) -> None: ...
+    async def reset(self) -> None: ...
 
 
 resetter = await container.get(ServicesResetter)

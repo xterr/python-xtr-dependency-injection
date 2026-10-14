@@ -18,7 +18,7 @@ class TaggedByAutoconfigure(ResetInterface):
         self.resets: int = 0
 
     @override
-    def reset(self) -> None:
+    async def reset(self) -> None:
         self.resets += 1
 
 

@@ -187,7 +187,7 @@ class ExplicitOverridingReset(ResetInterface):
         self.calls: list[str] = []
 
     @override
-    def reset(self) -> None:
+    async def reset(self) -> None:
         self.calls.append("reset")
 
     def clear(self) -> None:
