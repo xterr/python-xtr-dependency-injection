@@ -46,12 +46,24 @@ kernel = Kernel("app")
 uv add xtr-dependency-injection
 ```
 
-Libraries depend on it through an extra, so using them without a container costs nothing:
+An application installs it itself. A library that ships a bundle does not depend on it: it lists
+the container in its dev group, for its tests — and `xtr-service-contracts` too when only the
+bundle imports that, since the container brings it along:
 
 ```toml
-[project.optional-dependencies]
-di = ["xtr-dependency-injection>=4.0,<5"]
+[dependency-groups]
+dev = [
+    "xtr-dependency-injection>=4.0,<5",
+    "xtr-service-contracts>=4.0,<5",
+]
 ```
+
+`bundle/`, and every module that imports the container — the console commands a bundle loads,
+say — stay out of what `import acme_mail` imports, so the library imports and works with the
+container absent. The library advertises its bundle under the entry point (see
+[Advertising a bundle](#advertising-a-bundle)), and the bundle is used once the application
+installs the container beside it: `uv add acme-mail xtr-dependency-injection`. An extra is only
+for a third-party backend — never for the container, nor for another xtr package.
 
 Serving an application over HTTP takes the `fastapi` extra, which pulls in the web framework
 so the injection markers double as its dependency declarations (see [FastAPI](#fastapi)):
@@ -204,7 +216,8 @@ broken by name.
 
 ## Bundles for library authors
 
-A bundle is the integration, never the library: the library keeps working without a container.
+A bundle is the integration, never the library: the library keeps working without a container,
+and does not depend on one (see [Install](#install)).
 
 ```python
 # acme_mail/bundle/mail_bundle.py

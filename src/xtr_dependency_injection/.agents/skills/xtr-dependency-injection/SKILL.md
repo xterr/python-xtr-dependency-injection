@@ -241,9 +241,11 @@ Details and the HTTP recipe: [references/testing.md](references/testing.md).
 ## Adding or removing an xtr package
 
 1. Open that package's own skill, or its README section **Use in an application**, and follow
-   its steps in order — install with the right extras, list the bundle in `BUNDLES` (or learn
-   that another bundle already requires it), add the `@configure` module, set the variables,
-   add the `.gitignore` lines.
+   its steps in order — install it as its *Install* step says, list the bundle in `BUNDLES`
+   (or learn that another bundle already requires it), add the `@configure` module, set the
+   variables, add the `.gitignore` lines. Most xtr packages do not depend on the container: the
+   application installs `xtr-dependency-injection` beside them, and any other xtr package a
+   bundle integrates with likewise — never as an extra.
 2. Do not invent steps it does not list, and do not expect an installed package to wire
    itself.
 3. Confirm with `debug:bundles`: the bundle reads `active`, and nothing you meant to activate

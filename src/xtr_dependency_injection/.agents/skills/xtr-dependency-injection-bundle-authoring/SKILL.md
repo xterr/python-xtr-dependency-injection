@@ -56,12 +56,17 @@ src/acme_mail/
 `bundle/__init__.py` re-exports both (`__all__ = ["MailBundle", "MailConfig"]`), so an
 application configures the bundle with one import from `acme_mail.bundle`.
 
-Depend on the kernel through an extra, and advertise the bundle so `debug:bundles` can name it
-when an application installed the package and never listed it. Advertising activates nothing.
+Do not depend on the kernel. List it in the dev group, for the tests — and
+`xtr-service-contracts` too when only the bundle imports it, since the kernel brings it along.
+Keep `bundle/`, and every module importing the kernel (the commands a bundle loads), out of what
+`import acme_mail` imports, so the library imports with the kernel absent. Advertise the bundle
+so `debug:bundles` can name it when an application installed the package and never listed it;
+advertising activates nothing. The bundle is used once the application installs the kernel
+beside the library: `uv add acme-mail xtr-dependency-injection`.
 
 ```toml
-[project.optional-dependencies]
-di = ["xtr-dependency-injection>=4.0,<5"]
+[dependency-groups]
+dev = ["xtr-dependency-injection>=4.0,<5", "xtr-service-contracts>=4.0,<5"]
 
 [project.entry-points."xtr_dependency_injection.bundles"]
 mail = "acme_mail.bundle:MailBundle"
@@ -282,7 +287,11 @@ Raise the library's own typed errors from a bundle; these are what the kernel ra
 ## Do not
 
 - Do not make the library need the bundle: every class must be usable with plain constructor
-  arguments, and the kernel extra must stay optional.
+  arguments, so the library runs with no container at all.
+- Do not put the kernel, or another xtr package the library only integrates with, in
+  `dependencies` or behind an extra: it goes in the dev group, and the application installs it
+  beside the library. An extra is for a third-party backend only.
+- Do not import `bundle/`, or anything importing the kernel, from the package's `__init__.py`.
 - Do not inject the container into a service. Declare what you need (`Injected[...]`,
   `Target(...)`, `Sequence[T]`, `Mapping[Hashable, T]`, `ServiceLocator[T]`), and register a
   service whose dependency may be absent only when it is there.

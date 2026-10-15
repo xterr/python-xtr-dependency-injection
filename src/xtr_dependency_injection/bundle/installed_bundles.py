@@ -6,6 +6,10 @@ entry point group::
     [project.entry-points."xtr_dependency_injection.bundles"]
     mail = "acme_mail.bundle:MailBundle"
 
+The entry is metadata: the library declares it without depending on this
+package, and it is read only where an application installed the container
+beside the library.
+
 Advertising activates nothing: an application still lists the bundles it
 wants. What it buys is a question the kernel's report cannot answer on its
 own — *which installed bundles did the application leave out?* — so
@@ -41,10 +45,10 @@ class AdvertisedBundles:
     Attributes:
         bundles: Every usable bundle class, each once, by entry point name.
         unusable: ``(entry point name, what it said)`` for each entry that
-            could not be loaded — a package installed without the extra its
-            bundle needs, a name its module does not define, a module that
-            fails as it is imported. A diagnostic shows these rather than
-            leaving the entry unaccounted for.
+            could not be loaded — its module importing a package that is not
+            installed, a name its module does not define, a module that fails
+            as it is imported. A diagnostic shows these rather than leaving the
+            entry unaccounted for.
     """
 
     bundles: tuple[type[AnyBundle], ...]
@@ -55,8 +59,8 @@ def installed_bundles() -> tuple[type[AnyBundle], ...]:
     """Return every bundle class an installed distribution advertises, each once.
 
     Each advertised target is imported, so call this from a diagnostic, not
-    from a build. A target that cannot be loaded — its package installed
-    without the extra its bundle needs, a name its module does not define, a
+    from a build. A target that cannot be loaded — its module importing a
+    package that is not installed, a name its module does not define, a
     module that fails as it is imported — is not usable here, and one that is
     not a class decorated with ``@as_bundle`` is not a bundle: both are
     skipped rather than failing the diagnostic. :func:`advertised_bundles`
