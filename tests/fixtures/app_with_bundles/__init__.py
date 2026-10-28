@@ -1,6 +1,7 @@
-"""Fixture package: exercises the ``bundles.py`` convention.
+"""Fixture package: a bundle list where an earlier layout kept it, ``bundles.py``.
 
-``Kernel("tests.fixtures.app_with_bundles")`` finds ``bundles.py``, reads its
+``Kernel("tests.fixtures.app_with_bundles")`` finds no ``config/bundles.py``, falls back to
+``bundles.py``, reads its
 ``BUNDLES`` mapping, and activates every listed bundle whose flags match the
 build environment (or ``"all"``).
 """

@@ -1,6 +1,6 @@
 """Choosing which bundles a build activates, and in what order.
 
-Applications list root bundles in ``<package>/bundles.py`` as
+Applications list root bundles in ``<package>/config/bundles.py`` as
 ``BUNDLES = {LoggingBundle: {"all": True}, DebugBundle: {"dev": True}}``; the
 resolver starts from that mapping (plus the always-active ``KernelBundle``)
 and walks each active bundle's ``@required_bundle`` declarations recursively,
@@ -77,7 +77,7 @@ def resolve_bundles(
 
     Args:
         core: The ``kernel`` bundle; always active and always first.
-        listed: The bundles the application declared in ``bundles.py``, mapped
+        listed: The bundles the application declared in ``config/bundles.py``, mapped
             to their per-environment activity flags.
         env: The environment being built.
 

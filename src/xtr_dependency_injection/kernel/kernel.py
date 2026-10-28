@@ -6,7 +6,7 @@ the last, so tests and several kernels in one process never share a
 container. The steps are:
 
 1. environment — ``APP_ENV`` / ``APP_DEBUG`` or the arguments;
-2. bundles — activation from ``bundles.py`` + ``@required_bundle``, in order;
+2. bundles — activation from ``config/bundles.py`` + ``@required_bundle``, in order;
 3. early scan — the application's resources and the bundles';
 4. prepare — every bundle overriding ``process`` becomes a compiler pass, every
    bundle's ``build(builder)`` runs, then the scanned ``@compiler_pass``
@@ -144,7 +144,8 @@ class Kernel:
             bundles: The bundle classes the application lists, mapped to
                 their per-environment activity flags (``{"all": True}`` or
                 ``{"dev": True}``). When ``None`` the kernel imports
-                ``<package>.bundles`` and reads its ``BUNDLES`` mapping.
+                ``<package>.config.bundles`` — or ``<package>.bundles`` when
+                that is absent — and reads its ``BUNDLES`` mapping.
             resources: What to scan instead of ``package``.
             exclude: ``fnmatch`` patterns of modules never scanned;
                 replaces ``DEFAULT_EXCLUDES``.
@@ -619,27 +620,59 @@ def _package_dir(package: str | ModuleType) -> Path:
     return Path(location).resolve().parent
 
 
-def _load_bundles_module(package_name: str) -> Mapping[type[AnyBundle], Mapping[str, bool]]:
-    """Import ``<package_name>.bundles`` and return its ``BUNDLES`` mapping.
+#: Where an application's bundle list is read from, in the order looked for:
+#: beside the rest of its configuration, then where an earlier layout put it.
+_BUNDLES_MODULES: Final = ("config.bundles", "bundles")
 
-    The module is optional (a missing ``<package_name>.bundles`` yields an
-    empty mapping), but a module that does exist must expose ``BUNDLES``.
+
+def _load_bundles_module(package_name: str) -> Mapping[type[AnyBundle], Mapping[str, bool]]:
+    """Import ``<package_name>.config.bundles`` and return its ``BUNDLES`` mapping.
+
+    An application written before the bundle list joined its configuration
+    keeps it at ``<package_name>.bundles``, which is read when the first is
+    absent. Both are optional (neither yields an empty mapping), but a module
+    that does exist must expose ``BUNDLES``.
 
     Raises:
-        ResourceImportError: If ``<package_name>.bundles`` exists but a
-            deeper import fails.
+        ResourceImportError: If the bundle list exists but a deeper import
+            fails.
         BundleDefinitionError: If the module is present but lacks ``BUNDLES``,
             or if a listed class is not a decorated :class:`Bundle`.
     """
-    module_name = f"{package_name}.bundles"
+    for suffix in _BUNDLES_MODULES:
+        module = _bundles_module(f"{package_name}.{suffix}")
+        if module is not None:
+            return _listed_bundles(module)
+    return {}
+
+
+def _bundles_module(module_name: str) -> ModuleType | None:
+    """Import ``module_name``, or return ``None`` when it does not exist.
+
+    Raises:
+        ResourceImportError: If the module exists but a deeper import fails.
+    """
     try:
-        module = importlib.import_module(module_name)
+        return importlib.import_module(module_name)
     except ModuleNotFoundError as error:
-        if error.name == module_name:
-            return {}
+        # Absent itself, or absent because the package it sits in is: either
+        # way there is no bundle list here.
+        missing = error.name
+        if missing is not None and f"{module_name}.".startswith(f"{missing}."):
+            return None
         raise ResourceImportError(module_name) from error
     except ImportError as error:
         raise ResourceImportError(module_name) from error
+
+
+def _listed_bundles(module: ModuleType) -> Mapping[type[AnyBundle], Mapping[str, bool]]:
+    """Return the ``BUNDLES`` mapping ``module`` declares, checked entry by entry.
+
+    Raises:
+        BundleDefinitionError: If the module lacks ``BUNDLES``, or a listed
+            class is not a decorated :class:`Bundle`.
+    """
+    module_name = module.__name__
     raw = getattr(module, "BUNDLES", None)
     if raw is None:
         raise BundleDefinitionError(module_name, "it does not define BUNDLES")

@@ -30,7 +30,7 @@ The engine is hidden behind `ContainerInterface` — the application, and every 
 ships a bundle, never imports wireup.
 
 - 🐍 **Python-first configuration** — typed config objects and `@configure` functions, no files.
-- 📜 **Listed and required** — the application lists root bundles in `<package>/bundles.py`; required peers arrive through `@required_bundle`.
+- 📜 **Listed and required** — the application lists root bundles in `<package>/config/bundles.py`; required peers arrive through `@required_bundle`.
 - 🌗 **Per environment** — `@when("prod")` on anything scanned; a bundle activated only for `dev` never runs elsewhere.
 - 🧱 **Per kernel** — two kernels in one process share no container, no registry, no import side effect.
 - 🔍 **Explainable** — every bundle, config step and override is recorded, and printable.
@@ -75,7 +75,7 @@ uv add "xtr-dependency-injection[fastapi]"
 ## The golden path
 
 An application once the xtr libraries ship their bundles. Root bundles are listed in
-`app/bundles.py`; clock, logging and console arrive because the messenger bundle requires them.
+`app/config/bundles.py`; clock, logging and console arrive because the messenger bundle requires them.
 
 ```python
 # app/kernel.py
@@ -85,7 +85,7 @@ kernel = Kernel("app")  # does no work; env from APP_ENV (default "dev"), debug 
 ```
 
 ```python
-# app/bundles.py
+# app/config/bundles.py
 from xtr_messenger.bundle import MessengerBundle
 
 BUNDLES = {MessengerBundle: {"all": True}}
@@ -102,7 +102,7 @@ raise SystemExit(kernel.run(console))
 ```
 
 ```python
-# app/config/messenger.py
+# app/config/packages/messenger.py
 from dataclasses import replace
 
 from xtr_dependency_injection import configure, env
@@ -167,14 +167,16 @@ independent.
 | `package` | — | The application package, scanned recursively |
 | `env` / `debug` | `APP_ENV` or `"dev"` / `APP_DEBUG` or "not prod" | The environment built for |
 | `name` | last component of `package` | The application's name |
-| `bundles` | `<package>.bundles.BUNDLES` when defined, else `{}` | Root bundle classes mapped to per-environment activity flags |
+| `bundles` | `<package>.config.bundles.BUNDLES` when defined — else `<package>.bundles.BUNDLES`, the earlier layout — else `{}` | Root bundle classes mapped to per-environment activity flags |
 | `resources` | `(package,)` | What to scan instead of `package` |
 | `exclude` | `DEFAULT_EXCLUDES` | `fnmatch` patterns of modules never imported |
 | `allowed_envs` | `None` | Refuse any other environment |
 
 ### Wiring bundles
 
-An application lists root bundles in `<package>/bundles.py`. Each maps a class to per-env
+An application lists root bundles in `<package>/config/bundles.py` (an application laid out
+before the list joined its configuration keeps it at `<package>/bundles.py`, which is read when the
+first is absent). Each maps a class to per-env
 activity flags: `{"all": True}` for every environment, `{"dev": True, "test": True}` when you
 want that bundle only in development. **Installing a package does not activate a bundle**:
 nothing is discovered. If a bundle should be active, list it — or make another active bundle
@@ -183,7 +185,7 @@ require it. `debug:bundles` names the installed bundles that are neither (see
 *Use in an application*, exactly what adding it to an application takes.
 
 ```python
-# app/bundles.py
+# app/config/bundles.py
 from acme_debug.bundle import DebugBundle
 from acme_mail.bundle import MailBundle
 
@@ -1212,7 +1214,7 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 |---|---|---|
 | Bundle | `Bundle[ConfigT]` + `@as_bundle(...)`: `build` / `prepend_extension` / `load_extension` / `process` | One integration seam per library |
 | Required peer | `@required_bundle(target, ignore_on_invalid=...)` | Pull another bundle in recursively |
-| Root bundle list | `<package>/bundles.py` `BUNDLES = {Bundle: {"env": True}}` | The application picks its bundles, per environment |
+| Root bundle list | `<package>/config/bundles.py` `BUNDLES = {Bundle: {"env": True}}` | The application picks its bundles, per environment |
 | Bundle config | A typed config class buildable with no arguments; `__post_init__` validates | Configuration is Python, not files |
 | Application config | `@configure` functions | Provide or transform a bundle's config |
 | Environment gate | `@when("prod")` / `@when_not("prod")` | Skip a scanned object outside its environment |
@@ -1314,7 +1316,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 - **asyncio only** for `kernel.run`.
 - **Annotations must be importable at runtime** wherever wireup or the kernel reads them —
   not under `TYPE_CHECKING`.
-- **No bundle activation by discovery** and no command that edits `bundles.py`: advertised
+- **No bundle activation by discovery** and no command that edits `config/bundles.py`: advertised
   bundles are reported by `debug:bundles`, never activated.
 - **Environment placeholders are process-wide.** A placeholder stands for its expression, not
   for a kernel: every kernel reads it through its own processors, and the process keeps one

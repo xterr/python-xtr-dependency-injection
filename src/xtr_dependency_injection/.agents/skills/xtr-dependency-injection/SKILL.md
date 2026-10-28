@@ -17,7 +17,7 @@ Writing a bundle for a library is a different job: load the skill
 | Want | Write |
 | --- | --- |
 | The kernel | `kernel = Kernel("app")` in `app/kernel.py` |
-| Activate a bundle | `BUNDLES = {XBundle: {"all": True}}` in `app/bundles.py` |
+| Activate a bundle | `BUNDLES = {XBundle: {"all": True}}` in `app/config/bundles.py` |
 | Configure a bundle | `@configure` in `app/config/<bundle>.py`, returning its config type |
 | Register a class | `@as_service` (also `lifetime=`, `qualifier=`) |
 | Inject a service | a plain annotated parameter in a service; `Injected[T]` in a hook, command, handler or route |
@@ -39,8 +39,10 @@ Imports come from `xtr_dependency_injection`; a bundle and its config come from
 ```
 app/
 ├── kernel.py        the Kernel recipe — the one line every entry point shares
-├── bundles.py       BUNDLES: the root bundles, per environment
-├── config/          one @configure module per bundle, plus @parameters
+├── config/
+│   ├── bundles.py   BUNDLES: the root bundles, per environment
+│   ├── packages/    one @configure module per bundle, plus @parameters
+│   └── routes/      the route resources setup() serves (xtr-http-kernel)
 ├── __main__.py      the console entry point
 ├── web/app.py       the HTTP entry point (xtr-http-kernel)
 └── …                one package per concern; every module is scanned
@@ -58,7 +60,7 @@ environment comes from `APP_ENV` (default `dev`), debug from `APP_DEBUG` (defaul
 Other arguments: `name`, `bundles`, `resources`, `exclude`, `environ`, `allowed_envs`.
 
 ```python
-# app/bundles.py
+# app/config/bundles.py
 from xtr_console.bundle import ConsoleBundle
 from xtr_logging.bundle import LoggingBundle
 
@@ -166,7 +168,7 @@ and `bind_callable`: [references/services-and-injection.md](references/services-
 ## Configure a bundle
 
 ```python
-# app/config/mail.py
+# app/config/packages/mail.py
 from dataclasses import replace
 
 from xtr_dependency_injection import configure, env, when

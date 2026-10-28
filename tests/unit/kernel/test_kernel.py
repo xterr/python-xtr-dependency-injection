@@ -313,13 +313,21 @@ def test_two_kernels_build_independent_containers() -> None:
     assert first.container is not second.container
 
 
-def test_a_bundles_module_convention_activates_the_listed_bundle() -> None:
+def test_a_bundle_list_of_the_earlier_layout_still_activates_the_listed_bundle() -> None:
     compiled = Kernel("tests.fixtures.app_with_bundles", env="dev").build()
 
     names = {report.name for report in compiled.report.bundles if report.state == "active"}
     assert "listed" in names
     assert "kernel" in names
     assert ListedBundle in {type(bundle) for bundle in compiled._bundles}
+
+
+def test_the_bundle_list_beside_the_configuration_wins_over_an_earlier_one() -> None:
+    compiled = Kernel("tests.fixtures.app_with_config_bundles", env="dev", resources=()).build()
+
+    names = {report.name for report in compiled.report.bundles if report.state == "active"}
+    assert "configured" in names
+    assert "earlier" not in names
 
 
 def test_an_app_service_cannot_override_a_kernel_registered_service() -> None:
