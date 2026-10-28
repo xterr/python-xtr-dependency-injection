@@ -1,6 +1,6 @@
 [project]
 name = "xtr-dependency-injection"
-version = "5.0.1"
+version = "5.1.0"
 description = "A bundle and kernel layer for the xtr libraries, compiled to a wireup container."
 readme = "README.md"
 requires-python = ">=3.11"
