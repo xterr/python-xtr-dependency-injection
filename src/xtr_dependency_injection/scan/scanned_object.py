@@ -18,9 +18,13 @@ class ScannedObject:
             application's.
         order: Its position across every scan of one build — the scan
             order that ties break by.
+        in_environment_folder: Whether it was found in the application's
+            folder for the current environment, so it applies after, and
+            wins over, what the common modules declare.
     """
 
     obj: object
     name: str
     owner: str | None
     order: int
+    in_environment_folder: bool = False

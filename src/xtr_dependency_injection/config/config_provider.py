@@ -33,9 +33,9 @@ class ConfigProvider:
         form: ``"base"`` replaces the current value; ``"transform"``
             receives it.
         priority: Order among transforms, highest first.
-        conditional: Whether ``@when`` or ``@when_not`` restricts it; the
-            conditional group applies after, and wins over, the
-            unconditional one.
+        conditional: Whether ``@when`` or ``@when_not`` restricts it, or it
+            lies in an environment folder; the conditional group applies
+            after, and wins over, the unconditional one.
     """
 
     fn: Callable[..., object]
@@ -67,8 +67,15 @@ class ConfigProvider:
         return produced
 
 
-def config_provider_of(fn: Callable[..., object]) -> ConfigProvider:
+def config_provider_of(
+    fn: Callable[..., object], *, in_environment_folder: bool = False
+) -> ConfigProvider:
     """Read a ``@configure`` function into a :class:`ConfigProvider`.
+
+    Args:
+        fn: The ``@configure`` function.
+        in_environment_folder: Whether the scan found it in the current
+            environment's folder, which makes it conditional like ``@when``.
 
     Raises:
         ConfigProviderError: If ``fn`` is not marked, takes anything but
@@ -95,7 +102,9 @@ def config_provider_of(fn: Callable[..., object]) -> ConfigProvider:
         config_type=returned,
         form=form,
         priority=marker.priority,
-        conditional=when_envs_of(fn) is not None or when_not_envs_of(fn) is not None,
+        conditional=in_environment_folder
+        or when_envs_of(fn) is not None
+        or when_not_envs_of(fn) is not None,
     )
 
 

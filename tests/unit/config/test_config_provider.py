@@ -60,6 +60,10 @@ def test_an_unconditional_provider_is_not_conditional() -> None:
     assert not config_provider_of(base).conditional
 
 
+def test_a_provider_in_an_environment_folder_is_conditional() -> None:
+    assert config_provider_of(base, in_environment_folder=True).conditional
+
+
 def test_when_makes_a_provider_conditional() -> None:
     @configure
     @when("prod")

@@ -77,7 +77,9 @@ the application like any other, imported at the top of its `config/bundles.py` a
 `{"dev": True}`, and its package is a development dependency. A deployment without it still
 starts: where the package is not installed and the bundle is not active, the kernel stands it in
 and never needs it, and where it is active the build raises `MissingBundleError`. So no runtime
-package may import it, and its recipe lists it `{ dev = true }`.
+package may import it, and its recipe lists it `{ dev = true }`. Its README shows any
+configuration in the application's `config/packages/dev/` folder, which only a `dev` build
+imports.
 
 ## The config type
 

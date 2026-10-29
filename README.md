@@ -31,13 +31,13 @@ ships a bundle, never imports wireup.
 
 - 🐍 **Python-first configuration** — typed config objects and `@configure` functions, no files.
 - 📜 **Listed and required** — the application lists root bundles in `<package>/config/bundles.py`; required peers arrive through `@required_bundle`.
-- 🌗 **Per environment** — `@when("prod")` on anything scanned; a bundle activated only for `dev` never runs elsewhere.
+- 🌗 **Per environment** — `@when("prod")` on anything scanned, or a `config/packages/<env>/` folder imported only there; a bundle activated only for `dev` never runs elsewhere.
 - 🧱 **Per kernel** — two kernels in one process share no container, no registry, no import side effect.
 - 🔍 **Explainable** — every bundle, config step and override is recorded, and printable.
 - 🪶 **Three dependencies** — `wireup`, `typing-extensions` and `xtr-service-contracts`.
 
 ```python
-kernel = Kernel("app")
+kernel = Kernel(__package__)  # in app/kernel.py
 ```
 
 ## Install
@@ -81,7 +81,7 @@ An application once the xtr libraries ship their bundles. Root bundles are liste
 # app/kernel.py
 from xtr_dependency_injection import Kernel
 
-kernel = Kernel("app")  # does no work; env from APP_ENV (default "dev"), debug from APP_DEBUG
+kernel = Kernel(__package__)  # does no work; env from APP_ENV (default "dev"), debug from APP_DEBUG
 ```
 
 ```python
@@ -164,13 +164,17 @@ independent.
 
 | Argument | Default | Meaning |
 |---|---|---|
-| `package` | — | The application package, scanned recursively |
+| `package` | — | The application package, scanned recursively: `__package__` in its own `kernel.py`, a dotted name, or the module. `None` or `""` — a `kernel.py` run as a script, outside any package — raises `InvalidArgumentError` |
 | `env` / `debug` | `APP_ENV` or `"dev"` / `APP_DEBUG` or "not prod" | The environment built for |
 | `name` | last component of `package` | The application's name |
 | `bundles` | `<package>.config.bundles.BUNDLES` when defined — else `<package>.bundles.BUNDLES`, the earlier layout — else `{}` | Root bundle classes mapped to per-environment activity flags |
 | `resources` | `(package,)` | What to scan instead of `package` |
-| `exclude` | `DEFAULT_EXCLUDES` | `fnmatch` patterns of modules never imported |
-| `allowed_envs` | `None` | Refuse any other environment |
+| `exclude` | `()` | `fnmatch` patterns of modules never imported, added to `DEFAULT_EXCLUDES`. One starting with `.` is relative to `package` — `".web.app"` is `"<package>.web.app"` — even when `resources` names other modules |
+| `default_excludes` | `True` | `False` drops `DEFAULT_EXCLUDES`, leaving `exclude` alone |
+| `allowed_envs` | `None` | Refuse any other environment, and any environment folder named after another |
+
+The kernel's `package` property is the dotted package (a module given is known by its
+`__name__`), and so are `KernelInterface.package` and the `kernel.package` parameter.
 
 ### Wiring bundles
 
@@ -354,12 +358,35 @@ def mail_prod(config: MailConfig) -> MailConfig:
 Each bundle's config resolves in one deterministic order, and every step is recorded:
 
 1. the default, `MailConfig()`;
-2. the application's base provider — one under `@when`/`@when_not` wins over an
-   unconditional one;
+2. the application's base provider — one under `@when`/`@when_not`, or in the environment's
+   folder, wins over an unconditional one;
 3. an `alias_of` forward (see below) — at most one per config;
 4. other bundles' prepends, in bundle order (so they add to what the application chose);
-5. the application's transforms — unconditional, then conditional; by `priority`, then scan
-   order.
+5. the application's transforms — unconditional, then conditional (`@when`, `@when_not`, the
+   environment's folder); by `priority`, then scan order.
+
+### Environment folders
+
+A subpackage directly under `<package>/config/packages/` or `<package>/config/routes/` is an
+**environment folder**, named after an environment:
+
+```text
+app/config/packages/
+├── __init__.py
+├── mail.py          # every environment
+└── dev/
+    ├── __init__.py
+    └── maker.py     # dev only
+```
+
+Its modules, its `__init__` included, are imported only when the kernel is built for that
+environment, and after every common module, so what they configure or route comes after — a
+base provider there wins over a common one, and a transform there runs after every common
+transform. Another environment's folder is never imported. That is where a bundle listed for
+`dev` only is configured: production does not install its package, and never imports the
+module importing it. With `allowed_envs` set, a folder named after no allowed environment — a
+typo — is an `UnknownEnvironmentFolderError` at build; without it, every folder counts as an
+environment. `@when` and `@when_not` keep working in the common modules, for any environment.
 
 ### Prepending from another bundle
 
@@ -398,7 +425,7 @@ class MailConfig:
 ### Parameters
 
 **Parameters** are values injected with `Annotated[str, Autowire(param="...")]`. The kernel
-provides `kernel.name`, `kernel.environment`, `kernel.debug`, `kernel.project_dir`,
+provides `kernel.name`, `kernel.package`, `kernel.environment`, `kernel.debug`, `kernel.project_dir`,
 `kernel.share_dir` and `kernel.bundles` (a mapping of bundle name to `module:Class`); bundles
 add theirs with
 `builder.set_parameter(name, value)`, the application with `@parameters`. They merge into
@@ -516,8 +543,9 @@ prefixes, or replaces built-in ones. Load `.env` files into the environment with
 ## Scanning and autoconfiguration
 
 The kernel imports the application package — and every active bundle's `resources` — sorted
-by name, skipping `*.tests`, `*.test_*`, `*.conftest` and `*.__main__`. It considers only the
-functions and classes a module *defines*. Each goes to exactly one place:
+by name, skipping `*.tests`, `*.test_*`, `*.conftest` and `*.__main__` (`DEFAULT_EXCLUDES`) and
+what `exclude` adds, then the environment folders of the current environment. It considers
+only the functions and classes a module *defines*. Each goes to exactly one place:
 
 | Found | Becomes |
 |---|---|
@@ -1294,6 +1322,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled, or a listed bundle is active where its package is not installed |
 | `CircularBundleDependencyError` | Bundle dependencies loop |
 | `InvalidEnvironmentError` | The environment is not in `allowed_envs` |
+| `UnknownEnvironmentFolderError` | A folder under `config/packages/` or `config/routes/` is named after no environment in `allowed_envs` |
 | `ResourceImportError` | A scanned module failed to import |
 | `ConfigProviderError` | A bad `@configure` / `@parameters`, one found too late, `NoConfig` targeted, a bad parameter key, two queue markers on one object, an `alias_of` value of the wrong type |
 | `UnknownConfigTypeError` | No active bundle owns a configured type |
@@ -1311,7 +1340,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `ContainerCompilationError` | The engine failed to compile the container |
 | `ServiceResolutionError` | The engine failed to build a registered service |
 | `ServiceNotFoundError` / `ParameterNotFoundError` | `container.get` / `get_parameter` miss (`LookupError`) |
-| `InvalidArgumentTypeError` / `InvalidArgumentError` | An API given something of the wrong kind (`TypeError`) / a value it cannot use (`ValueError`) — `services.set` given neither a class nor a function, `Target` beside `Autowire(param=...)` |
+| `InvalidArgumentTypeError` / `InvalidArgumentError` | An API given something of the wrong kind (`TypeError`) / a value it cannot use (`ValueError`) — `services.set` given neither a class nor a function, `Target` beside `Autowire(param=...)`, `Kernel(None)` |
 | `BuilderPhaseError` / `BuilderFrozenError` | A builder operation in the wrong phase / after compilation |
 | `KernelAlreadyBootedError` | A compiled kernel booted twice |
 | `UnknownLocatorKeyError` | `ServiceLocator.get` with an unknown name (`LookupError`) |

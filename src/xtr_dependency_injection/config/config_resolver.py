@@ -4,7 +4,8 @@ For every active bundle, in order:
 
 1. its config type's default, ``C()``;
 2. the application's base provider, if any — one conditional on the
-   environment beats an unconditional one;
+   environment (``@when``, ``@when_not``, or found in the environment's
+   folder) beats an unconditional one;
 3. ``AliasOf`` forwards from other bundles, whose configs resolve first;
 4. other bundles' prepends (recorded via
    ``builder.prepend_extension_config`` from ``Bundle.prepend_extension``),
@@ -99,7 +100,11 @@ def resolve_configs(
     owned = {type(bundle).metadata().config: type(bundle).metadata().name for bundle in bundles}
     active_by_name = {type(bundle).metadata().name: bundle for bundle in bundles}
     parsed = [
-        config_provider_of(cast("Callable[..., object]", scanned.obj)) for scanned in providers
+        config_provider_of(
+            cast("Callable[..., object]", scanned.obj),
+            in_environment_folder=scanned.in_environment_folder,
+        )
+        for scanned in providers
     ]
     for provider in parsed:
         _ = _owner(provider.config_type, provider.name, owned, inactive)

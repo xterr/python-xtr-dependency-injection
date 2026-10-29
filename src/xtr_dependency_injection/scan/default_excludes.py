@@ -16,6 +16,6 @@ DEFAULT_EXCLUDES: Final[tuple[str, ...]] = (
 """``fnmatch`` patterns of module names never imported by a scan.
 
 Tests and entry points are not services, and importing ``__main__`` would
-run the application. ``Kernel(exclude=...)`` replaces these; extend them with
-``(*DEFAULT_EXCLUDES, "app.scripts.*")``.
+run the application. ``Kernel(exclude=...)`` adds to these;
+``Kernel(default_excludes=False)`` drops them.
 """

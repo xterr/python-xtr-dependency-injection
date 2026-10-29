@@ -56,7 +56,7 @@ A bundle adds parameters from `build`:
 ```
 
 They merge into nested mappings and never override: a leaf set twice is a
-`ParameterConflictError` naming both sources. The kernel provides `kernel.name`,
+`ParameterConflictError` naming both sources. The kernel provides `kernel.name`, `kernel.package`,
 `kernel.environment`, `kernel.debug`, `kernel.project_dir`, `kernel.share_dir` and
 `kernel.bundles`.
 

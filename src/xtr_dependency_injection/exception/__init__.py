@@ -39,6 +39,7 @@ from .service_not_found_error import ServiceNotFoundError
 from .service_order_error import ServiceOrderError
 from .service_resolution_error import ServiceResolutionError
 from .unknown_config_type_error import UnknownConfigTypeError
+from .unknown_environment_folder_error import UnknownEnvironmentFolderError
 from .unknown_locator_key_error import UnknownLocatorKeyError
 from .unknown_service_error import UnknownServiceError
 
@@ -74,6 +75,7 @@ __all__ = [
     "ServiceOrderError",
     "ServiceResolutionError",
     "UnknownConfigTypeError",
+    "UnknownEnvironmentFolderError",
     "UnknownLocatorKeyError",
     "UnknownServiceError",
 ]

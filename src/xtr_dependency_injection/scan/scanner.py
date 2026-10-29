@@ -6,6 +6,12 @@ module that defined it. Every object found goes to exactly one place: a
 queue for its marker (``@configure``, ``@on_boot``…), or the service
 candidates autoconfiguration looks at. An object excluded, or left out of the
 environment, goes nowhere; the latter is reported.
+
+A direct subpackage of the application's ``config.packages`` or
+``config.routes`` is an *environment folder*, named after an environment. It
+is imported only in that environment, after everything else the scan walks,
+so what it configures or routes comes after the common modules; another
+environment's folder is never imported at all.
 """
 
 from __future__ import annotations
@@ -27,7 +33,11 @@ from xtr_dependency_injection.decorator.compiler_pass import compiler_pass_of
 from xtr_dependency_injection.decorator.exclude import is_excluded
 from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown_of
 from xtr_dependency_injection.decorator.when import matches_env, when_envs_of, when_not_envs_of
-from xtr_dependency_injection.exception import ConfigProviderError, ResourceImportError
+from xtr_dependency_injection.exception import (
+    ConfigProviderError,
+    ResourceImportError,
+    UnknownEnvironmentFolderError,
+)
 from xtr_dependency_injection.exception._naming import qualified_name
 
 from .scanned_object import ScannedObject
@@ -46,6 +56,8 @@ _QUEUES: Final[tuple[tuple[str, str, Callable[[object], object]], ...]] = (
     ("@as_decorator", "decorators", decorator_of),
 )
 _EARLY_ONLY: Final = frozenset({"@configure", "@parameters", "@compiler_pass"})
+_ENVIRONMENT_FOLDER_PARENTS: Final = ("config.packages", "config.routes")
+"""Where, inside the application package, a subpackage is an environment folder."""
 
 
 @dataclass(slots=True)
@@ -84,12 +96,45 @@ class ScanResult:
 class Scanner:
     """Scans resources for one build: early, then late, never finding an object twice."""
 
-    __slots__ = ("_env", "_exclude", "_module_names", "_order", "_seen", "modules", "skipped")
+    __slots__ = (
+        "_allowed_envs",
+        "_env",
+        "_environment_parents",
+        "_exclude",
+        "_module_names",
+        "_order",
+        "_seen",
+        "modules",
+        "skipped",
+    )
 
-    def __init__(self, *, env: str, exclude: Sequence[str]) -> None:
-        """Scan for ``env``, leaving out modules matching the ``exclude`` patterns."""
+    def __init__(
+        self,
+        *,
+        env: str,
+        exclude: Sequence[str],
+        package: str = "",
+        allowed_envs: Sequence[str] | None = None,
+    ) -> None:
+        """Scan for ``env``, leaving out modules matching the ``exclude`` patterns.
+
+        Args:
+            env: The environment the build is for.
+            exclude: ``fnmatch`` patterns of module names never imported.
+            package: The application package, whose ``config.packages`` and
+                ``config.routes`` hold the environment folders; empty for
+                none.
+            allowed_envs: The environments an environment folder may be
+                named after; ``None`` takes every folder name as one.
+        """
         self._env = env
         self._exclude = tuple(exclude)
+        self._environment_parents = (
+            frozenset(f"{package}.{parent}" for parent in _ENVIRONMENT_FOLDER_PARENTS)
+            if package
+            else frozenset[str]()
+        )
+        self._allowed_envs = tuple(allowed_envs) if allowed_envs is not None else None
         self._seen: set[int] = set()
         self._order = 0
         self.modules: list[str] = []
@@ -110,22 +155,31 @@ class Scanner:
 
         Raises:
             ResourceImportError: If a module fails to import.
+            UnknownEnvironmentFolderError: If an environment folder is not
+                named after an allowed environment.
             ConfigProviderError: If an object carries two queue markers, or a
                 late scan finds a ``@configure``, ``@parameters`` or
                 ``@compiler_pass`` — each is needed before bundles load.
         """
         result = ScanResult()
-        for module in self._modules(resources):
-            for scanned in self._candidates(module, owner):
+        for module, in_environment_folder in self._modules(resources):
+            for scanned in self._candidates(
+                module, owner, in_environment_folder=in_environment_folder
+            ):
                 self._classify(scanned, result, late=late)
         return result
 
-    def _modules(self, resources: Sequence[str | ModuleType]) -> Iterator[ModuleType]:
+    def _modules(self, resources: Sequence[str | ModuleType]) -> Iterator[tuple[ModuleType, bool]]:
+        """Yield each module, and whether it lies in an environment folder — those come last."""
+        folders: list[str] = []
         for resource in resources:
             root = resource if isinstance(resource, ModuleType) else _import(resource)
-            yield from self._walk(root)
+            yield from ((module, False) for module in self._walk(root, folders))
+        for folder in folders:
+            yield from ((module, True) for module in self._walk(_import(folder), folders))
 
-    def _walk(self, module: ModuleType) -> Iterator[ModuleType]:
+    def _walk(self, module: ModuleType, folders: list[str]) -> Iterator[ModuleType]:
+        """Yield ``module`` and what it holds; queue this environment's folders into ``folders``."""
         if module.__name__ not in self._module_names:
             self._module_names.add(module.__name__)
             self.modules.append(module.__name__)
@@ -133,15 +187,37 @@ class Scanner:
         path = cast("list[str] | None", getattr(module, "__path__", None))
         if path is None:
             return
+        holds_folders = module.__name__ in self._environment_parents
         children = sorted(pkgutil.iter_modules(path, f"{module.__name__}."), key=lambda m: m.name)
         for child in children:
-            if not self._excluded(child.name):
-                yield from self._walk(_import(child.name))
+            if self._excluded(child.name):
+                continue
+            if holds_folders and child.ispkg:
+                if self._is_current_environment(child.name):
+                    folders.append(child.name)
+                continue
+            yield from self._walk(_import(child.name), folders)
 
     def _excluded(self, name: str) -> bool:
         return any(fnmatchcase(name, pattern) for pattern in self._exclude)
 
-    def _candidates(self, module: ModuleType, owner: str | None) -> Iterator[ScannedObject]:
+    def _is_current_environment(self, folder: str) -> bool:
+        """Return whether ``folder`` is the build's environment folder, reporting it if not.
+
+        Raises:
+            UnknownEnvironmentFolderError: If its name is not an allowed environment.
+        """
+        environment = folder.rsplit(".", 1)[-1]
+        if self._allowed_envs is not None and environment not in self._allowed_envs:
+            raise UnknownEnvironmentFolderError(folder, self._allowed_envs)
+        if environment == self._env:
+            return True
+        self.skipped.append((folder, f"environment folder for {environment!r}, not {self._env!r}"))
+        return False
+
+    def _candidates(
+        self, module: ModuleType, owner: str | None, *, in_environment_folder: bool
+    ) -> Iterator[ScannedObject]:
         for obj in cast("list[object]", list(vars(module).values())):
             if not (inspect.isfunction(obj) or inspect.isclass(obj)):
                 continue
@@ -149,7 +225,13 @@ class Scanner:
                 continue
             self._seen.add(id(obj))
             self._order += 1
-            yield ScannedObject(obj, qualified_name(obj), owner, self._order)
+            yield ScannedObject(
+                obj,
+                qualified_name(obj),
+                owner,
+                self._order,
+                in_environment_folder=in_environment_folder,
+            )
 
     def _classify(self, scanned: ScannedObject, result: ScanResult, *, late: bool) -> None:
         obj = scanned.obj

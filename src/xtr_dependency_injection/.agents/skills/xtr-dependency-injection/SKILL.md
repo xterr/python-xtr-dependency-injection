@@ -16,9 +16,10 @@ Writing a bundle for a library is a different job: load the skill
 
 | Want | Write |
 | --- | --- |
-| The kernel | `kernel = Kernel("app")` in `app/kernel.py` |
+| The kernel | `kernel = Kernel(__package__)` in `app/kernel.py` |
 | Activate a bundle | `BUNDLES = {XBundle: {"all": True}}` in `app/config/bundles.py` |
 | Configure a bundle | `@configure` in `app/config/<bundle>.py`, returning its config type |
+| Configure for one environment | a module in `app/config/packages/<env>/`, or `@when("<env>")` |
 | Register a class | `@as_service` (also `lifetime=`, `qualifier=`) |
 | Inject a service | a plain annotated parameter in a service; `Injected[T]` in a hook, command, handler or route |
 | Inject a qualified one | `Annotated[T, Target("smtp")]` |
@@ -42,6 +43,7 @@ app/
 ├── config/
 │   ├── bundles.py   BUNDLES: the root bundles, per environment
 │   ├── packages/    one @configure module per bundle, plus @parameters
+│   │   └── dev/     an environment folder: imported in dev only, after the rest
 │   └── routes/      the route resources setup() serves (xtr-http-kernel)
 ├── __main__.py      the console entry point
 ├── web/app.py       the HTTP entry point (xtr-http-kernel)
@@ -52,12 +54,24 @@ app/
 # app/kernel.py
 from xtr_dependency_injection import Kernel
 
-kernel = Kernel("app", allowed_envs=("dev", "test", "prod"))
+kernel = Kernel(__package__, allowed_envs=("dev", "test", "prod"), exclude=(".web.app",))
 ```
 
-`Kernel(...)` does no work: it stores a recipe, and every `build()` is independent. The
+`Kernel(...)` does no work: it stores a recipe, and every `build()` is independent.
+`__package__` names the application package once, from inside it; `kernel.py` run as a script
+has none, and the kernel refuses it with `InvalidArgumentError`. The package is
+`kernel.package`, also `KernelInterface.package` and the `kernel.package` parameter. The
 environment comes from `APP_ENV` (default `dev`), debug from `APP_DEBUG` (default: not prod).
-Other arguments: `name`, `bundles`, `resources`, `exclude`, `environ`, `allowed_envs`.
+`exclude` adds to `DEFAULT_EXCLUDES` (tests, `conftest`, `__main__`); a pattern starting with
+`.` is relative to the package, and `default_excludes=False` drops the defaults. Other
+arguments: `name`, `bundles`, `resources`, `environ`, `allowed_envs`.
+
+A subpackage of `app/config/packages/` or `app/config/routes/` is an **environment folder**:
+imported only in the environment it is named after, after every common module, so its
+`@configure` functions win over the common ones. Configure a bundle listed for `dev` only in
+`app/config/packages/dev/` — production does not install its package and never imports that
+folder. With `allowed_envs`, a folder named after no allowed environment is an
+`UnknownEnvironmentFolderError`.
 
 ```python
 # app/config/bundles.py
@@ -276,6 +290,7 @@ Every error derives from `DependencyInjectionError`. The ones an application mee
 | `ParameterConflictError` / `ParameterNotFoundError` | One parameter leaf set twice / `%name%` names a parameter nothing sets |
 | `EnvPlaceholderError` | A placeholder used as a real value while building — typically `if env(...)` |
 | `InvalidEnvironmentError` | `APP_ENV` is outside `allowed_envs` |
+| `UnknownEnvironmentFolderError` | A folder in `config/packages/` or `config/routes/` is not named after an allowed environment — rename it, or move its modules up |
 
 The full list, and what each diagnostic command prints:
 [references/diagnostics-and-errors.md](references/diagnostics-and-errors.md).
@@ -296,3 +311,6 @@ The full list, and what each diagnostic command prints:
 - Do not expect an installed package to activate itself; list its bundle.
 - Do not configure one bundle from another application module by hand; one `@configure`
   function per bundle, in `app/config/`.
+- Do not import a development-only package (`xtr_maker`) from a module directly under
+  `app/config/packages/`: every environment imports it, and production fails to start. Use
+  `app/config/packages/dev/`.

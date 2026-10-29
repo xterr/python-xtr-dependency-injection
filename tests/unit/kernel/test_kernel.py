@@ -22,6 +22,7 @@ from tests.support.bundles import (
 from xtr_dependency_injection.exception import (
     BundleDefinitionError,
     DuplicateServiceError,
+    InvalidArgumentError,
     InvalidEnvironmentError,
     KernelAlreadyBootedError,
     ResourceImportError,
@@ -100,6 +101,22 @@ def test_an_explicit_name_wins() -> None:
     assert Kernel(APP, name="shop").name == "shop"
 
 
+def test_the_package_is_the_dotted_name_given() -> None:
+    assert Kernel("acme.shop").package == "acme.shop"
+
+
+def test_a_module_given_as_the_package_is_known_by_its_name() -> None:
+    import tests.fixtures.app_kernel as package  # noqa: PLC0415 — the module object is the input.
+
+    assert Kernel(package).package == APP
+
+
+@pytest.mark.parametrize("package", [None, ""])
+def test_no_package_is_refused_saying_where_kernel_py_belongs(package: str | None) -> None:
+    with pytest.raises(InvalidArgumentError, match=r"inside the application package.*__package__"):
+        _ = Kernel(package)
+
+
 def test_the_project_dir_is_the_nearest_pyproject() -> None:
     assert Kernel(APP).project_dir == Path(__file__).resolve().parents[3]
 
@@ -141,6 +158,7 @@ async def test_the_kernel_is_a_service() -> None:
         "dev",
         ("kernel", "echo", "chorus"),
     )
+    assert info.package == APP
     assert info.report is compiled.report
     assert isinstance(info, KernelInterface)
 
@@ -149,6 +167,7 @@ async def test_kernel_parameters_are_injectable() -> None:
     compiled = _kernel(name="shop").build()
 
     assert compiled.container.get_parameter("kernel.name") == "shop"
+    assert compiled.container.get_parameter("kernel.package") == APP
     assert compiled.container.get_parameter("kernel.environment") == "dev"
     assert compiled.container.get_parameter("echo.greeting") == "HELLO"
 

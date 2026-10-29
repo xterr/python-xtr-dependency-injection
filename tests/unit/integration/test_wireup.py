@@ -52,6 +52,7 @@ async def test_the_injectables_build_a_working_container() -> None:
     info = await container.get(KernelInterface)
 
     assert (info.name, info.environment, info.debug) == ("standalone", "prod", False)
+    assert info.package == ""
     assert info.bundles == ("kernel", "quiet")
     assert [report.name for report in info.report.bundles] == ["kernel", "quiet"]
 

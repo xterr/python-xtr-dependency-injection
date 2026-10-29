@@ -148,6 +148,7 @@ def _prepared(
     """Run the standalone pipeline: every bundle given, active in every environment."""
     return prepare(
         name="standalone",
+        package="",
         environment=env,
         debug=False,
         project_dir=Path.cwd(),

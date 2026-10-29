@@ -22,11 +22,12 @@ def mail_spool(config: MailConfig) -> MailConfig:
 Resolution order, recorded step by step in `debug:config`:
 
 1. the bundle's default, `MailConfig()`;
-2. the application's base provider — one under `@when` / `@when_not` beats an unconditional one;
+2. the application's base provider — one under `@when` / `@when_not`, or in the environment's
+   folder, beats an unconditional one;
 3. a forward from another bundle's config field (`AliasOf`), at most one;
 4. other bundles' prepends, in bundle order;
-5. the application's transforms — unconditional first, then conditional; by `priority`, then
-   scan order.
+5. the application's transforms — unconditional first, then conditional (`@when`, `@when_not`,
+   the environment's folder); by `priority`, then scan order.
 
 Rules:
 
@@ -38,9 +39,20 @@ Rules:
 - Put `@configure`, `@parameters` and `@compiler_pass` in modules the early scan sees, never
   in a module a bundle loads late.
 
+## Environment folders
+
+A subpackage directly under `app/config/packages/` or `app/config/routes/` is named after an
+environment: `app/config/packages/dev/maker.py` is imported only when the kernel builds for
+`dev`, after every common module, and never otherwise. A base there replaces a common base; a
+transform there runs after every common transform. Configure a bundle listed for `dev` only
+there, so a production install without its package never imports it. With `allowed_envs` set,
+a folder named after another environment is an `UnknownEnvironmentFolderError`; without it,
+any name is an environment. `@when("staging")` in a common module still works for any
+environment.
+
 ## Parameters
 
-Named values injected by key. The kernel provides `kernel.name`, `kernel.environment`,
+Named values injected by key. The kernel provides `kernel.name`, `kernel.package`, `kernel.environment`,
 `kernel.debug`, `kernel.project_dir`, `kernel.share_dir` and `kernel.bundles`; bundles add
 theirs; the application adds its own:
 

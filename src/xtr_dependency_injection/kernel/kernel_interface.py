@@ -23,6 +23,11 @@ class KernelInterface(Protocol):
         ...
 
     @property
+    def package(self) -> str:
+        """The application package, dotted; empty in a container built without a kernel."""
+        ...
+
+    @property
     def environment(self) -> str:
         """The environment this container was built for."""
         ...
@@ -52,20 +57,32 @@ class KernelInterface(Protocol):
 class _KernelInfo:
     """The one ``KernelInterface`` the kernel provides, filled in as the build proceeds."""
 
-    __slots__ = ("_bundles", "_debug", "_environment", "_name", "_project_dir", "_report")
+    __slots__ = (
+        "_bundles",
+        "_debug",
+        "_environment",
+        "_name",
+        "_package",
+        "_project_dir",
+        "_report",
+    )
 
     def __init__(self) -> None:
         """Start blank; the kernel fills each field in the step that decides it."""
         self._name = ""
+        self._package = ""
         self._environment = ""
         self._debug = False
         self._project_dir = Path()
         self._bundles: tuple[str, ...] = ()
         self._report = KernelReport()
 
-    def identify(self, *, name: str, environment: str, debug: bool, project_dir: Path) -> None:
+    def identify(
+        self, *, name: str, package: str, environment: str, debug: bool, project_dir: Path
+    ) -> None:
         """Record who the kernel is and what it is built for."""
         self._name = name
+        self._package = package
         self._environment = environment
         self._debug = debug
         self._project_dir = project_dir
@@ -82,6 +99,11 @@ class _KernelInfo:
     def name(self) -> str:
         """The application's name."""
         return self._name
+
+    @property
+    def package(self) -> str:
+        """The application package, dotted; empty in a container built without a kernel."""
+        return self._package
 
     @property
     def environment(self) -> str:

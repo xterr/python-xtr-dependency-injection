@@ -65,6 +65,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled, or a listed bundle is active where its package is not installed |
 | `CircularBundleDependencyError` | Bundle requirements loop, or an `AliasOf` forward does |
 | `InvalidEnvironmentError` | The environment is not in `allowed_envs` |
+| `UnknownEnvironmentFolderError` | A folder under `config/packages/` or `config/routes/` is named after no environment in `allowed_envs` |
 | `ResourceImportError` | A scanned module failed to import |
 | `BundleDefinitionError` | A malformed bundle declaration or `"module:Class"` target |
 

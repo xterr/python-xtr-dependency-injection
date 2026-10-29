@@ -30,6 +30,7 @@ from xtr_dependency_injection.exception import (
     ServiceNotFoundError,
     ServiceResolutionError,
     UnknownConfigTypeError,
+    UnknownEnvironmentFolderError,
     UnknownLocatorKeyError,
     UnknownServiceError,
 )
@@ -89,6 +90,13 @@ def test_invalid_environment_error_lists_the_allowed() -> None:
 
     assert (error.env, error.allowed) == ("qa", ("dev", "prod"))
     assert str(error) == "environment 'qa' is not allowed; allowed: dev, prod"
+
+
+def test_unknown_environment_folder_error_names_the_folder_and_the_allowed() -> None:
+    error = UnknownEnvironmentFolderError("app.config.packages.staing", ("dev", "prod"))
+
+    assert (error.folder, error.allowed) == ("app.config.packages.staing", ("dev", "prod"))
+    assert "'staing' is not an allowed environment (allowed: dev, prod)" in str(error)
 
 
 def test_resource_import_error_names_the_module() -> None:

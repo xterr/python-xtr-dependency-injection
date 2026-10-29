@@ -1,13 +1,15 @@
 r"""The kernel: one line for the application, the whole build behind it.
 
-``Kernel("app")`` does no work; it is a recipe. ``build()`` runs every step
+``Kernel(__package__)``, in the application package's ``kernel.py``, does no
+work; it is a recipe. ``build()`` runs every step
 below, in order, and returns a compiled container — each call independent of
 the last, so tests and several kernels in one process never share a
 container. The steps are:
 
 1. environment — ``APP_ENV`` / ``APP_DEBUG`` or the arguments;
 2. bundles — activation from ``config/bundles.py`` + ``@required_bundle``, in order;
-3. early scan — the application's resources and the bundles';
+3. early scan — the application's resources, the current environment's
+   folders last, then the bundles';
 4. prepare — every bundle overriding ``process`` becomes a compiler pass, every
    bundle's ``build(builder)`` runs, then the scanned ``@compiler_pass``
    classes are registered;
@@ -54,6 +56,7 @@ from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown
 from xtr_dependency_injection.diagnostics import DefinitionReport
 from xtr_dependency_injection.diagnostics.report import KernelReport, ReportBuilder
 from xtr_dependency_injection.exception import (
+    InvalidArgumentError,
     InvalidArgumentTypeError,
     InvalidEnvironmentError,
     InvalidEnvironmentVariableError,
@@ -108,6 +111,7 @@ class Kernel:
         "_bundles",
         "_concurrent_scoped_access",
         "_debug",
+        "_default_excludes",
         "_env",
         "_environ",
         "_exclude",
@@ -118,7 +122,7 @@ class Kernel:
 
     def __init__(  # noqa: PLR0913 — each argument is a separate, optional decision.
         self,
-        package: str | ModuleType,
+        package: str | ModuleType | None,
         /,
         *,
         env: str | None = None,
@@ -126,7 +130,8 @@ class Kernel:
         name: str | None = None,
         bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,
         resources: Sequence[str] | None = None,
-        exclude: Sequence[str] = DEFAULT_EXCLUDES,
+        exclude: Sequence[str] = (),
+        default_excludes: bool = True,
         allowed_envs: Sequence[str] | None = None,
         concurrent_scoped_access: bool = False,
         environ: Mapping[str, str] | None = None,
@@ -134,7 +139,9 @@ class Kernel:
         """Store the kernel's recipe.
 
         Args:
-            package: The application package, scanned recursively.
+            package: The application package, scanned recursively: its dotted
+                name or the module. ``Kernel(__package__)`` in the package's
+                own ``kernel.py`` names it once, where it cannot drift.
             env: The environment; default ``APP_ENV``, else ``"dev"``.
             debug: Debug mode; default ``APP_DEBUG``, else true outside
                 ``"prod"``.
@@ -149,15 +156,32 @@ class Kernel:
                 stood in for, and reported disabled where its flags leave it
                 inactive.
             resources: What to scan instead of ``package``.
-            exclude: ``fnmatch`` patterns of modules never scanned;
-                replaces ``DEFAULT_EXCLUDES``.
-            allowed_envs: The only environments the kernel accepts.
+            exclude: ``fnmatch`` patterns of modules never scanned, added to
+                ``DEFAULT_EXCLUDES``. A pattern starting with ``.`` is
+                relative to the application package — ``".scripts"`` is
+                ``"<package>.scripts"`` — whatever ``resources`` names.
+            default_excludes: Whether ``DEFAULT_EXCLUDES`` applies; false
+                leaves ``exclude`` alone.
+            allowed_envs: The only environments the kernel accepts, and the
+                only names a folder under ``config/packages/`` or
+                ``config/routes/`` may take.
             concurrent_scoped_access: Passed to wireup.
             environ: Where ``APP_ENV``, ``APP_DEBUG`` and every ``env(...)``
                 placeholder are read; ``None`` reads the live process
                 environment. A test gives each kernel its own.
+
+        Raises:
+            InvalidArgumentError: If ``package`` is ``None`` or empty — what
+                ``__package__`` is in a script run on its own, outside any
+                package.
         """
-        self._package = package
+        if package is None or package == "":
+            msg = (
+                f"Kernel was given {package!r} as the application package; put kernel.py "
+                "inside the application package and build the kernel with Kernel(__package__)"
+            )
+            raise InvalidArgumentError(msg)
+        self._package: str | ModuleType = package
         self._env = env
         self._debug = debug
         self._name = name
@@ -166,6 +190,7 @@ class Kernel:
         )
         self._resources = tuple(resources) if resources is not None else None
         self._exclude = tuple(exclude)
+        self._default_excludes = default_excludes
         self._allowed_envs = tuple(allowed_envs) if allowed_envs is not None else None
         self._concurrent_scoped_access = concurrent_scoped_access
         self._environ = environ
@@ -173,7 +198,12 @@ class Kernel:
     @property
     def name(self) -> str:
         """The application's name."""
-        return self._name if self._name is not None else self._package_name.rsplit(".", 1)[-1]
+        return self._name if self._name is not None else self.package.rsplit(".", 1)[-1]
+
+    @property
+    def package(self) -> str:
+        """The application package, dotted."""
+        return self._package if isinstance(self._package, str) else self._package.__name__
 
     @property
     def environment(self) -> str:
@@ -230,6 +260,7 @@ class Kernel:
             bundles=self._bundles,
             resources=self._resources,
             exclude=self._exclude,
+            default_excludes=self._default_excludes,
             allowed_envs=self._allowed_envs,
             concurrent_scoped_access=self._concurrent_scoped_access,
             environ=self._environ,
@@ -239,17 +270,17 @@ class Kernel:
         """Run steps 1 to 6 and return the compiled container, not yet booted."""
         environment, debug = self.environment, self.debug
         _check_environment(environment, self._allowed_envs)
-        listed = (
-            self._bundles if self._bundles is not None else load_bundle_list(self._package_name)
-        )
+        listed = self._bundles if self._bundles is not None else load_bundle_list(self.package)
         prepared = prepare(
             name=self.name,
+            package=self.package,
             environment=environment,
             debug=debug,
             project_dir=self.project_dir,
             listed=listed,
             resources=self._resources if self._resources is not None else (self._package,),
-            exclude=self._exclude,
+            exclude=self._scan_excludes,
+            allowed_envs=self._allowed_envs,
             environ=self._environ,
         )
         state = prepared.assembly.state
@@ -297,8 +328,14 @@ class Kernel:
         return result
 
     @property
-    def _package_name(self) -> str:
-        return self._package if isinstance(self._package, str) else self._package.__name__
+    def _scan_excludes(self) -> tuple[str, ...]:
+        """The patterns the scan leaves out: the defaults, then ``exclude`` made absolute."""
+        defaults = DEFAULT_EXCLUDES if self._default_excludes else ()
+        given = (
+            f"{self.package}{pattern}" if pattern.startswith(".") else pattern
+            for pattern in self._exclude
+        )
+        return (*defaults, *given)
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +358,7 @@ class Assembly:
 def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     *,
     name: str,
+    package: str,
     bundles: Sequence[AnyBundle],
     active: Sequence[str],
     inactive_config_owners: Mapping[type, str],
@@ -330,6 +368,7 @@ def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     project_dir: Path,
     exclude: Sequence[str],
     report: ReportBuilder,
+    allowed_envs: Sequence[str] | None = None,
     given: Sequence[object] = (),
     environ: Mapping[str, str] | None = None,
 ) -> Assembly:
@@ -338,7 +377,7 @@ def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     Shared by :func:`prepare`, which computes ``active`` once for both the
     report and this call.
     """
-    scanner = Scanner(env=environment, exclude=exclude)
+    scanner = Scanner(env=environment, exclude=exclude, package=package, allowed_envs=allowed_envs)
     early = _early_scan(scanner, resources, bundles)
     state = BuildState(
         env=environment, debug=debug, bundles=tuple(active), configs={}, environ=environ
@@ -348,6 +387,7 @@ def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     _register_kernel_parameters(
         state,
         name=name,
+        package=package,
         environment=environment,
         debug=debug,
         project_dir=project_dir,
@@ -413,12 +453,14 @@ class Prepared:
 def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     *,
     name: str,
+    package: str,
     environment: str,
     debug: bool,
     project_dir: Path,
     listed: ListedBundles,
     resources: Sequence[str | ModuleType],
     exclude: Sequence[str],
+    allowed_envs: Sequence[str] | None = None,
     given: Sequence[object] = (),
     environ: Mapping[str, str] | None = None,
 ) -> Prepared:
@@ -430,7 +472,9 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     do differently.
     """
     core = KernelBundle()
-    core.info.identify(name=name, environment=environment, debug=debug, project_dir=project_dir)
+    core.info.identify(
+        name=name, package=package, environment=environment, debug=debug, project_dir=project_dir
+    )
     report = ReportBuilder()
     resolved = resolve_bundles(core=core, listed=listed, env=environment)
     active = [type(bundle).metadata().name for bundle in resolved.bundles]
@@ -439,6 +483,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     inactive_config_owners = _inactive_config_owners(listed, active)
     assembly = assemble(
         name=name,
+        package=package,
         bundles=resolved.bundles,
         active=active,
         inactive_config_owners=inactive_config_owners,
@@ -448,6 +493,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
         project_dir=project_dir,
         exclude=exclude,
         report=report,
+        allowed_envs=allowed_envs,
         given=given,
         environ=environ,
     )
@@ -518,10 +564,11 @@ def _prepare_container(
         compiler.add_pass(pass_class(), marker.stage, marker.priority, origin=origin)
 
 
-def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a fixed 5-field shape.
+def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a fixed 6-field shape.
     state: BuildState,
     *,
     name: str,
+    package: str,
     environment: str,
     debug: bool,
     project_dir: Path,
@@ -529,10 +576,10 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
 ) -> None:
     """Register the ``kernel.*`` parameters into ``state`` before any bundle's ``build`` runs.
 
-    The kernel exposes ``kernel.name``, ``kernel.environment``, ``kernel.debug``,
-    ``kernel.project_dir``, ``kernel.share_dir`` and ``kernel.bundles`` (name →
-    class) from the very beginning of the container build; every bundle's hook
-    may read them.
+    The kernel exposes ``kernel.name``, ``kernel.package``, ``kernel.environment``,
+    ``kernel.debug``, ``kernel.project_dir``, ``kernel.share_dir`` and
+    ``kernel.bundles`` (name → class) from the very beginning of the container
+    build; every bundle's hook may read them.
     """
     bundles_map = {type(bundle).metadata().name: qualified_name(type(bundle)) for bundle in bundles}
     state.add_parameters(
@@ -540,6 +587,7 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
         {
             KERNEL_BUNDLE: {
                 "name": name,
+                "package": package,
                 "environment": environment,
                 "debug": debug,
                 "project_dir": str(project_dir),
