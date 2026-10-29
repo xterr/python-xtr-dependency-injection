@@ -195,6 +195,17 @@ BUNDLES = {
 }
 ```
 
+A bundle for development only is imported and listed like any other, flagged for the
+environments it runs in — `DebugBundle` above. A deployment that does not install its package
+still loads the list: when an import of a package that is not installed fails it, the kernel
+imports the list again with that package stood in for. In an environment where the bundle is
+not active it is never needed: the report shows it `env_disabled`, under the `"module:Class"` it
+was imported as. Where its flags make it active, the build stops with `MissingBundleError`,
+naming it — so a bundle listed `{"all": True}` whose package is missing, a misspelt import
+say, fails everywhere. Only the list's own imports are stood in for: an application module, or
+one of an installed package, that needs the missing package still fails to import, and a module
+missing from the application or from an installed package is a `ResourceImportError`.
+
 A bundle declares peers with the repeatable `@required_bundle` decorator. Required bundles
 are pulled in recursively; a required class
 inherits the requirer's activity in each environment. A string `"module:Class"` target is
@@ -1280,7 +1291,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 |---|---|
 | `BundleDefinitionError` | A bad `@as_bundle` / `@required_bundle`, a reserved name, a bundle or config not buildable with no arguments, two bundles sharing a config type, a bad `"module:Class"` target |
 | `DuplicateBundleError` | Two bundles share a name |
-| `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled |
+| `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled, or a listed bundle is active where its package is not installed |
 | `CircularBundleDependencyError` | Bundle dependencies loop |
 | `InvalidEnvironmentError` | The environment is not in `allowed_envs` |
 | `ResourceImportError` | A scanned module failed to import |

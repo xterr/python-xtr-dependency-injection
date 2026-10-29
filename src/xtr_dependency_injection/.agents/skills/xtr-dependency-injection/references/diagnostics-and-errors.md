@@ -25,6 +25,8 @@ With the console bundle active the same sections are commands:
 
 `debug:bundles` is the first thing to run after adding or removing a package. A bundle under
 **Installed, not active** means the package is installed and nothing listed it.
+A listed bundle whose package is not installed — a development tool in a deployment — shows
+`env_disabled`, its `Name` and `Class` both the `"module:Class"` it was imported as.
 
 `report.definitions` is readable from code — each entry carries `key` (a `(type, qualifier)`
 pair) and `tags` — which is how a boot hook can walk tagged services in emission order.
@@ -60,7 +62,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | Error | Raised when |
 | --- | --- |
 | `DuplicateBundleError` | Two bundles share a name |
-| `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled |
+| `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled, or a listed bundle is active where its package is not installed |
 | `CircularBundleDependencyError` | Bundle requirements loop, or an `AliasOf` forward does |
 | `InvalidEnvironmentError` | The environment is not in `allowed_envs` |
 | `ResourceImportError` | A scanned module failed to import |

@@ -12,6 +12,7 @@ from xtr_dependency_injection.bundle import (
     as_bundle,
     required_bundle,
 )
+from xtr_dependency_injection.bundle._absent_bundle import AbsentBundle
 from xtr_dependency_injection.bundle.as_bundle import declare_bundle
 from xtr_dependency_injection.bundle.bundle_resolver import resolve_bundles
 from xtr_dependency_injection.exception import (
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
+
+
+_TOOLS = AbsentBundle("acme_tools.bundle", "ToolsBundle")
 
 
 @dataclass(frozen=True)
@@ -285,3 +289,39 @@ def test_a_bundle_listed_off_in_this_env_but_required_by_an_active_one_is_active
     )
 
     assert order == ["kernel", "beta", "alpha"]
+
+
+def test_an_absent_bundle_disabled_in_the_env_is_reported_by_what_it_stands_for() -> None:
+    resolved = resolve_bundles(core=CoreBundle(), listed={_TOOLS: {"dev": True}}, env="prod")
+
+    (tools,) = [report for report in resolved.reports if report.state != "active"]
+    assert (tools.name, tools.qualname, tools.source, tools.state) == (
+        "acme_tools.bundle:ToolsBundle",
+        "acme_tools.bundle:ToolsBundle",
+        "listed",
+        "env_disabled",
+    )
+
+
+def test_an_absent_bundle_disabled_in_the_env_leaves_the_rest_active() -> None:
+    resolved = resolve_bundles(
+        core=CoreBundle(),
+        listed={BetaBundle: {"all": True}, _TOOLS: {"dev": True}},
+        env="prod",
+    )
+
+    assert [type(bundle).metadata().name for bundle in resolved.bundles] == ["kernel", "beta"]
+
+
+def test_an_absent_bundle_active_in_the_env_is_refused() -> None:
+    with pytest.raises(MissingBundleError) as caught:
+        _ = resolve_bundles(core=CoreBundle(), listed={_TOOLS: {"dev": True}}, env="dev")
+
+    assert caught.value.name == "acme_tools.bundle:ToolsBundle"
+
+
+def test_an_absent_bundle_listed_for_every_env_is_refused() -> None:
+    with pytest.raises(MissingBundleError) as caught:
+        _ = resolve_bundles(core=CoreBundle(), listed={_TOOLS: {"all": True}}, env="prod")
+
+    assert caught.value.name == "acme_tools.bundle:ToolsBundle"

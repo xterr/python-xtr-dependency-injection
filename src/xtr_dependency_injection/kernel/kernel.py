@@ -20,7 +20,6 @@ container. The steps are:
 from __future__ import annotations
 
 import asyncio
-import importlib
 import importlib.util
 import os
 from collections.abc import Callable, Mapping
@@ -34,8 +33,9 @@ from xtr_dependency_injection.builder.container_builder import ContainerBuilder
 from xtr_dependency_injection.builder.definition import Definition, Origin, ServiceKey
 from xtr_dependency_injection.builder.service_configurator import BuildState
 from xtr_dependency_injection.bundle import KERNEL_BUNDLE, NoConfig
+from xtr_dependency_injection.bundle._absent_bundle import AbsentBundle
 from xtr_dependency_injection.bundle.bundle import AnyBundle, Bundle
-from xtr_dependency_injection.bundle.bundle_resolver import resolve_bundles
+from xtr_dependency_injection.bundle.bundle_resolver import ListedBundles, resolve_bundles
 from xtr_dependency_injection.compiler.merge_extension_configuration_pass import (
     MergeExtensionConfigurationPass,
 )
@@ -54,11 +54,9 @@ from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown
 from xtr_dependency_injection.diagnostics import DefinitionReport
 from xtr_dependency_injection.diagnostics.report import KernelReport, ReportBuilder
 from xtr_dependency_injection.exception import (
-    BundleDefinitionError,
     InvalidArgumentTypeError,
     InvalidEnvironmentError,
     InvalidEnvironmentVariableError,
-    ResourceImportError,
 )
 from xtr_dependency_injection.exception._naming import key_name as _naming_key_name
 from xtr_dependency_injection.exception._naming import qualified_name
@@ -68,6 +66,7 @@ from xtr_dependency_injection.runtime.service_locator_injectables import (
 from xtr_dependency_injection.scan.default_excludes import DEFAULT_EXCLUDES
 from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 
+from ._bundle_list import load_bundle_list
 from .booted_kernel import BootedKernel, call_injected
 from .compiled_kernel import CompiledKernel
 from .kernel_bundle import KernelBundle
@@ -145,7 +144,10 @@ class Kernel:
                 their per-environment activity flags (``{"all": True}`` or
                 ``{"dev": True}``). When ``None`` the kernel imports
                 ``<package>.config.bundles`` — or ``<package>.bundles`` when
-                that is absent — and reads its ``BUNDLES`` mapping.
+                that is absent — and reads its ``BUNDLES`` mapping. A class
+                that list imports from a package that is not installed is
+                stood in for, and reported disabled where its flags leave it
+                inactive.
             resources: What to scan instead of ``package``.
             exclude: ``fnmatch`` patterns of modules never scanned;
                 replaces ``DEFAULT_EXCLUDES``.
@@ -238,7 +240,7 @@ class Kernel:
         environment, debug = self.environment, self.debug
         _check_environment(environment, self._allowed_envs)
         listed = (
-            self._bundles if self._bundles is not None else _load_bundles_module(self._package_name)
+            self._bundles if self._bundles is not None else load_bundle_list(self._package_name)
         )
         prepared = prepare(
             name=self.name,
@@ -414,7 +416,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     environment: str,
     debug: bool,
     project_dir: Path,
-    listed: Mapping[type[AnyBundle], Mapping[str, bool]],
+    listed: ListedBundles,
     resources: Sequence[str | ModuleType],
     exclude: Sequence[str],
     given: Sequence[object] = (),
@@ -549,12 +551,15 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
 
 
 def _inactive_config_owners(
-    listed: Mapping[type[AnyBundle], Mapping[str, bool]],
+    listed: ListedBundles,
     active: Sequence[str],
 ) -> Mapping[type, str]:
     """Return a mapping ``config_type -> bundle name`` for listed but env-disabled bundles."""
     result: dict[type, str] = {}
     for bundle_type in listed:
+        if isinstance(bundle_type, AbsentBundle):
+            # Its package is not installed, so nothing can configure it.
+            continue
         metadata = bundle_type.metadata()
         if metadata.name in active:
             continue
@@ -618,79 +623,3 @@ def _package_dir(package: str | ModuleType) -> Path:
     if location is None:
         return Path.cwd()
     return Path(location).resolve().parent
-
-
-#: Where an application's bundle list is read from, in the order looked for:
-#: beside the rest of its configuration, then where an earlier layout put it.
-_BUNDLES_MODULES: Final = ("config.bundles", "bundles")
-
-
-def _load_bundles_module(package_name: str) -> Mapping[type[AnyBundle], Mapping[str, bool]]:
-    """Import ``<package_name>.config.bundles`` and return its ``BUNDLES`` mapping.
-
-    An application written before the bundle list joined its configuration
-    keeps it at ``<package_name>.bundles``, which is read when the first is
-    absent. Both are optional (neither yields an empty mapping), but a module
-    that does exist must expose ``BUNDLES``.
-
-    Raises:
-        ResourceImportError: If the bundle list exists but a deeper import
-            fails.
-        BundleDefinitionError: If the module is present but lacks ``BUNDLES``,
-            or if a listed class is not a decorated :class:`Bundle`.
-    """
-    for suffix in _BUNDLES_MODULES:
-        module = _bundles_module(f"{package_name}.{suffix}")
-        if module is not None:
-            return _listed_bundles(module)
-    return {}
-
-
-def _bundles_module(module_name: str) -> ModuleType | None:
-    """Import ``module_name``, or return ``None`` when it does not exist.
-
-    Raises:
-        ResourceImportError: If the module exists but a deeper import fails.
-    """
-    try:
-        return importlib.import_module(module_name)
-    except ModuleNotFoundError as error:
-        # Absent itself, or absent because the package it sits in is: either
-        # way there is no bundle list here.
-        missing = error.name
-        if missing is not None and f"{module_name}.".startswith(f"{missing}."):
-            return None
-        raise ResourceImportError(module_name) from error
-    except ImportError as error:
-        raise ResourceImportError(module_name) from error
-
-
-def _listed_bundles(module: ModuleType) -> Mapping[type[AnyBundle], Mapping[str, bool]]:
-    """Return the ``BUNDLES`` mapping ``module`` declares, checked entry by entry.
-
-    Raises:
-        BundleDefinitionError: If the module lacks ``BUNDLES``, or a listed
-            class is not a decorated :class:`Bundle`.
-    """
-    module_name = module.__name__
-    raw = getattr(module, "BUNDLES", None)
-    if raw is None:
-        raise BundleDefinitionError(module_name, "it does not define BUNDLES")
-    if not isinstance(raw, Mapping):
-        raise BundleDefinitionError(
-            module_name, "BUNDLES must be a mapping of bundle class to activity flags"
-        )
-    result: dict[type[AnyBundle], Mapping[str, bool]] = {}
-    # An application's BUNDLES, checked entry by entry below.
-    for cls, flags in raw.items():  # pyright: ignore[reportUnknownVariableType]
-        cls_obj = cast("object", cls)
-        if not (isinstance(cls_obj, type) and issubclass(cls_obj, Bundle)):
-            raise BundleDefinitionError(
-                module_name, f"{cls_obj!r} listed in BUNDLES is not a Bundle subclass"
-            )
-        if not isinstance(flags, Mapping):
-            raise BundleDefinitionError(
-                module_name, f"activity flags for {cls_obj!r} must be a mapping"
-            )
-        result[cast("type[AnyBundle]", cls_obj)] = dict(cast("Mapping[str, bool]", flags))
-    return result

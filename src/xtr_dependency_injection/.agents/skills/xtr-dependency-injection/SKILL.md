@@ -75,6 +75,13 @@ BUNDLES = {
 because an active bundle requires it. An environment named explicitly beats `"all"`, so
 `{"all": True, "prod": False}` is everywhere but prod.
 
+A development-only bundle, `DebugBundle` above, is imported and listed like any other. Where
+its package is not installed — a deployment that leaves the dev dependencies out — and its flags
+leave it inactive, the kernel stands it in and never needs it: `debug:bundles` shows it
+`env_disabled` under its `"module:Class"`. Active there, the build raises `MissingBundleError`.
+So never give a development tool's bundle `{"all": True}`, and never import its package from
+application code.
+
 Entry points, all on the same kernel:
 
 ```python
@@ -263,7 +270,7 @@ Every error derives from `DependencyInjectionError`. The ones an application mee
 | `<Owner>.<param> needs <Type>, which is not a registered service` (`ContainerCompilationError`) | Mark `<Type>` `@as_service`, alias it with `@as_alias`, or check the qualifier `<Type>['q']` the message names |
 | `ServiceResolutionError` saying *scope mismatch* | A scoped or transient service asked of the root container: resolve it inside `unit_of_work(container)`, from an injected parameter, or with `bind_callable(..., per_call_scope=True)` |
 | `ServiceResolutionError` caused by `MissingEnvironmentVariableError` | The variable is unset; set it, or give `env()` a `default=` |
-| `MissingBundleError` | A required bundle is absent, excluded or disabled for this environment |
+| `MissingBundleError` | A required bundle is absent, excluded or disabled for this environment — or a listed one is active here and its package is not installed: install it, or narrow its flags |
 | `UnknownConfigTypeError` | The `@configure` function returns a type no active bundle owns — list its bundle |
 | `ConflictingConfigProvidersError` | Two base providers for one config. Write a transform (take the config as a parameter) instead of a second base |
 | `ParameterConflictError` / `ParameterNotFoundError` | One parameter leaf set twice / `%name%` names a parameter nothing sets |

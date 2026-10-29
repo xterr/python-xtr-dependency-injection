@@ -72,6 +72,13 @@ dev = ["xtr-dependency-injection>=5.0,<6", "xtr-service-contracts>=5.0,<6"]
 mail = "acme_mail.bundle:MailBundle"
 ```
 
+A bundle for development only — one whose commands write application code, say — is listed by
+the application like any other, imported at the top of its `config/bundles.py` and flagged
+`{"dev": True}`, and its package is a development dependency. A deployment without it still
+starts: where the package is not installed and the bundle is not active, the kernel stands it in
+and never needs it, and where it is active the build raises `MissingBundleError`. So no runtime
+package may import it, and its recipe lists it `{ dev = true }`.
+
 ## The config type
 
 A frozen dataclass (or a msgspec `Struct`) buildable with no arguments. `@as_bundle` builds it
@@ -276,7 +283,7 @@ Raise the library's own typed errors from a bundle; these are what the kernel ra
 | --- | --- |
 | `BundleDefinitionError` | A bad or reserved name, a class that is not a `Bundle`, a bundle or config needing constructor arguments, a bad `"module:Class"` target, a bundle requiring itself |
 | `DuplicateBundleError` | Two bundles share a name |
-| `MissingBundleError` | A hard peer is absent, skipped or disabled |
+| `MissingBundleError` | A hard peer is absent, skipped or disabled, or a listed bundle is active where its package is not installed |
 | `CircularBundleDependencyError` | Requirements, or `AliasOf` forwards, loop |
 | `BuilderPhaseError` / `BuilderFrozenError` | A builder call in the wrong hook / after compilation |
 | `ConfigProviderError` / `UnknownConfigTypeError` | A prepend target takes no config / no active bundle owns a config type |

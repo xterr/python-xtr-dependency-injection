@@ -6,6 +6,13 @@ resolver starts from that mapping (plus the always-active ``KernelBundle``)
 and walks each active bundle's ``@required_bundle`` declarations recursively,
 importing string targets lazily. Only active bundle classes are instantiated
 (lazy instantiation: a disabled bundle's class is never constructed).
+
+A listed entry may also be an :class:`AbsentBundle`: the stand-in the kernel
+puts in a bundle list for a class imported from a package that is not
+installed. Disabled by its flags, it is reported by the ``"module:Class"`` it
+stands for; active, it is refused, since nothing can stand in for a bundle that
+runs.
+
 Every bundle considered — active, disabled by the environment or skipped for
 an invalid ``ignore_on_invalid`` target — is reported.
 """
@@ -14,8 +21,9 @@ from __future__ import annotations
 
 import heapq
 import importlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 
 from xtr_dependency_injection.diagnostics import BundleReport
 from xtr_dependency_injection.exception import (
@@ -26,18 +34,29 @@ from xtr_dependency_injection.exception import (
 )
 from xtr_dependency_injection.exception._naming import qualified_name
 
+from ._absent_bundle import AbsentBundle
 from .bundle import KERNEL_BUNDLE, METADATA_ATTRIBUTE, AnyBundle, Bundle, NoConfig
 from .bundle_metadata import BundleMetadata
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from .required_bundle import RequiredBundle
 
-__all__ = ["ResolvedBundles", "resolve_bundles"]
+__all__ = ["ListedBundles", "ResolvedBundles", "resolve_bundles"]
 
 Source = Literal["kernel", "listed", "required"]
 State = Literal["active", "skipped", "env_disabled"]
+
+ListedBundles: TypeAlias = (
+    Mapping[type[AnyBundle], Mapping[str, bool]]
+    | Mapping[type[AnyBundle] | AbsentBundle, Mapping[str, bool]]
+)
+"""The root bundles, each mapped to its per-environment activity flags.
+
+A list read from an application's bundle list may also hold an
+:class:`AbsentBundle`. A mapping's key type is invariant, so both shapes are
+spelt out: a mapping of classes alone, as an application or a test gives one,
+is still a list.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +89,7 @@ class _Candidate:
 def resolve_bundles(
     *,
     core: AnyBundle,
-    listed: Mapping[type[AnyBundle], Mapping[str, bool]],
+    listed: ListedBundles,
     env: str,
 ) -> ResolvedBundles:
     """Return the bundles active in ``env``, ordered, with a report on each.
@@ -84,7 +103,8 @@ def resolve_bundles(
     Raises:
         DuplicateBundleError: If two different classes share one bundle name.
         MissingBundleError: If a required bundle cannot be imported (and its
-            declaration is not ``ignore_on_invalid``).
+            declaration is not ``ignore_on_invalid``), or a listed bundle whose
+            package is not installed is active in ``env``.
         BundleDefinitionError: If a required class is not a decorated
             :class:`Bundle`, or two active bundles share a non-``NoConfig``
             config type, or a listed bundle raises when instantiated.
@@ -92,9 +112,12 @@ def resolve_bundles(
     """
     candidates: dict[str, _Candidate] = {}
     _ = _register_class(candidates, type(core), source="kernel", active=True)
-    for bundle_type, flags in listed.items():
+    for entry, flags in listed.items():
         active = _is_active_in(env, flags)
-        _ = _register_class(candidates, bundle_type, source="listed", active=active)
+        if isinstance(entry, AbsentBundle):
+            candidates[entry.target] = _absent(entry, env, active=active)
+        else:
+            _ = _register_class(candidates, entry, source="listed", active=active)
     _close_over_required(candidates)
     for candidate in candidates.values():
         if not candidate.active and candidate.state == "active":
@@ -120,6 +143,32 @@ def _is_active_in(env: str, flags: Mapping[str, bool]) -> bool:
     if env in flags:
         return flags[env]
     return flags.get("all", False)
+
+
+def _absent(entry: AbsentBundle, env: str, *, active: bool) -> _Candidate:
+    """Return the report entry of a listed bundle whose package is not installed.
+
+    A bundle's name and config are read off its class, which is not there to
+    read, so the entry knows it by the ``"module:Class"`` it stands for.
+
+    Raises:
+        MissingBundleError: If its flags make it active in ``env``.
+    """
+    if active:
+        reason = (
+            f"it is active in {env!r} but its package is not installed "
+            "(probably a development dependency)"
+        )
+        raise MissingBundleError(entry.target, None, reason)
+    return _Candidate(
+        bundle_type=cast("type[AnyBundle]", Bundle),
+        metadata=BundleMetadata(name=entry.target, config=NoConfig),
+        qualname=entry.target,
+        source="listed",
+        active=False,
+        state="env_disabled",
+        reason=f"not active in {env!r}; its package is not installed",
+    )
 
 
 def _register_class(
