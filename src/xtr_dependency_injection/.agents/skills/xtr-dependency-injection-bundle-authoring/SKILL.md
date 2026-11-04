@@ -66,7 +66,7 @@ beside the library: `uv add acme-mail xtr-dependency-injection`.
 
 ```toml
 [dependency-groups]
-dev = ["xtr-dependency-injection>=5.0,<6", "xtr-service-contracts>=5.0,<6"]
+dev = ["xtr-dependency-injection>=6.0,<7", "xtr-service-contracts>=6.0,<7"]
 
 [project.entry-points."xtr_dependency_injection.bundles"]
 mail = "acme_mail.bundle:MailBundle"
