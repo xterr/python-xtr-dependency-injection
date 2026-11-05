@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,6 +98,16 @@ BUNDLE_PASS_PRIORITY: Final = -10000
 The later stages still run after it.
 """
 
+_DEBUG_ENVS: Final = frozenset({"dev", "test"})
+# The two environments the kernel itself names — "dev" is its own default
+# environment, "test" is the convention every scaffold declares; anything else
+# must ask for debug explicitly.
+
+_DEBUG_DEFAULT_WARNED: set[str] = set()
+# Module-level because the property may be read more than once and the kernel
+# has no private environ to mark: this keeps the migration warning to one per
+# environment name, per process.
+
 
 @final
 class Kernel:
@@ -143,8 +154,8 @@ class Kernel:
                 name or the module. ``Kernel(__package__)`` in the package's
                 own ``kernel.py`` names it once, where it cannot drift.
             env: The environment; default ``APP_ENV``, else ``"dev"``.
-            debug: Debug mode; default ``APP_DEBUG``, else true outside
-                ``"prod"``.
+            debug: Debug mode; default ``APP_DEBUG``, else true for ``"dev"``
+                and ``"test"``.
             name: The application's name; default the package's last
                 component.
             bundles: The bundle classes the application lists, mapped to
@@ -216,7 +227,13 @@ class Kernel:
 
     @property
     def debug(self) -> bool:
-        """Debug mode: the argument, else ``APP_DEBUG``, else true outside ``"prod"``.
+        """Debug mode: the argument, else ``APP_DEBUG``, else true for ``"dev"`` and ``"test"``.
+
+        Any other environment fails closed — debug is off — so a
+        security-relevant flag never defaults to on for a name the kernel does
+        not know. ``"prod"`` is off silently; an environment outside
+        ``"dev"``, ``"test"`` and ``"prod"`` warns once per process, saying
+        how to ask for debug explicitly.
 
         Raises:
             InvalidEnvironmentVariableError: If ``APP_DEBUG`` is neither
@@ -226,7 +243,18 @@ class Kernel:
             return self._debug
         value = self._environment_variables.get("APP_DEBUG")
         if value is None:
-            return self.environment != "prod"
+            environment = self.environment
+            if environment in _DEBUG_ENVS:
+                return True
+            if environment not in _DEBUG_DEFAULT_WARNED and environment != "prod":
+                _DEBUG_DEFAULT_WARNED.add(environment)
+                msg = (
+                    f"Debug mode defaulted to off: environment {environment!r} is not one the "
+                    "kernel names ('dev' or 'test'); set APP_DEBUG=1 or pass debug= to the "
+                    "Kernel to turn it on."
+                )
+                warnings.warn(msg, RuntimeWarning, stacklevel=2)
+            return False
         normalized = value.strip().lower()
         if normalized in {"1", "true", "yes", "on"}:
             return True

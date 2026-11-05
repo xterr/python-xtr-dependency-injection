@@ -165,7 +165,7 @@ independent.
 | Argument | Default | Meaning |
 |---|---|---|
 | `package` | — | The application package, scanned recursively: `__package__` in its own `kernel.py`, a dotted name, or the module. `None` or `""` — a `kernel.py` run as a script, outside any package — raises `InvalidArgumentError` |
-| `env` / `debug` | `APP_ENV` or `"dev"` / `APP_DEBUG` or "not prod" | The environment built for |
+| `env` / `debug` | `APP_ENV` or `"dev"` / `APP_DEBUG` or on for `"dev"` / `"test"` | The environment built for |
 | `name` | last component of `package` | The application's name |
 | `bundles` | `<package>.config.bundles.BUNDLES` when defined — else `<package>.bundles.BUNDLES`, the earlier layout — else `{}` | Root bundle classes mapped to per-environment activity flags |
 | `resources` | `(package,)` | What to scan instead of `package` |

@@ -61,7 +61,9 @@ kernel = Kernel(__package__, allowed_envs=("dev", "test", "prod"), exclude=(".we
 `__package__` names the application package once, from inside it; `kernel.py` run as a script
 has none, and the kernel refuses it with `InvalidArgumentError`. The package is
 `kernel.package`, also `KernelInterface.package` and the `kernel.package` parameter. The
-environment comes from `APP_ENV` (default `dev`), debug from `APP_DEBUG` (default: not prod).
+environment comes from `APP_ENV` (default `dev`), debug from `APP_DEBUG` (default: on for
+`dev` and `test`; any other environment is debug-off, and one the kernel does not name warns
+once).
 `exclude` adds to `DEFAULT_EXCLUDES` (tests, `conftest`, `__main__`); a pattern starting with
 `.` is relative to the package, and `default_excludes=False` drops the defaults. Other
 arguments: `name`, `bundles`, `resources`, `environ`, `allowed_envs`.

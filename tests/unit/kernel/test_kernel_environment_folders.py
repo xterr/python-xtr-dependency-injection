@@ -81,9 +81,18 @@ def _write_app(scratch_modules: ScratchModules, package: str) -> None:
     )
 
 
-def _build(package: str, env: str, allowed_envs: tuple[str, ...] | None = None) -> CompiledKernel:
+def _build(
+    package: str,
+    env: str,
+    allowed_envs: tuple[str, ...] | None = None,
+    debug: bool | None = None,
+) -> CompiledKernel:
     return Kernel(
-        package, env=env, bundles={EchoBundle: {"all": True}}, allowed_envs=allowed_envs
+        package,
+        env=env,
+        debug=debug,
+        bundles={EchoBundle: {"all": True}},
+        allowed_envs=allowed_envs,
     ).build()
 
 
@@ -145,7 +154,9 @@ def test_when_in_a_common_module_applies_to_any_environment(
 ) -> None:
     _write_app(scratch_modules, "staging_shop")
 
-    compiled = _build("staging_shop", "staging")
+    # debug=False keeps the test on the folders; "staging" is not an
+    # environment the kernel names, so its default would warn first.
+    compiled = _build("staging_shop", "staging", debug=False)
 
     assert _echo(compiled) == EchoConfig(greeting="common", channels=("common", "staging"))
 

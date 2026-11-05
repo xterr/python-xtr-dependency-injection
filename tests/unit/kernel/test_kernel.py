@@ -24,14 +24,16 @@ from xtr_dependency_injection.exception import (
     DuplicateServiceError,
     InvalidArgumentError,
     InvalidEnvironmentError,
+    InvalidEnvironmentVariableError,
     KernelAlreadyBootedError,
     ResourceImportError,
 )
 from xtr_dependency_injection.kernel import Kernel, KernelInterface
+from xtr_dependency_injection.kernel.kernel import _DEBUG_DEFAULT_WARNED
 from xtr_dependency_injection.runtime.services_resetter import ServicesResetter
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     from xtr_dependency_injection.bundle.bundle import AnyBundle
 
@@ -54,12 +56,14 @@ def _kernel(
     env: str = "dev",
     *,
     bundles: Mapping[type[AnyBundle], Mapping[str, bool]] | None = None,
+    debug: bool | None = None,
     name: str | None = None,
     allowed_envs: tuple[str, ...] | None = None,
 ) -> Kernel:
     return Kernel(
         APP,
         env=env,
+        debug=debug,
         name=name,
         bundles=bundles if bundles is not None else _DEFAULT_BUNDLES,
         allowed_envs=allowed_envs,
@@ -84,17 +88,86 @@ def test_the_environment_defaults_to_dev(monkeypatch: pytest.MonkeyPatch) -> Non
     assert Kernel(APP).environment == "dev"
 
 
-def test_debug_defaults_to_on_outside_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture(autouse=True)
+def fresh_debug_default_warning() -> Iterator[None]:
+    """Reset the once-per-process guard the debug default keeps, so a test warns anew."""
+    _DEBUG_DEFAULT_WARNED.clear()
+    yield
+    _DEBUG_DEFAULT_WARNED.clear()
+
+
+def test_debug_defaults_to_on_for_the_environments_the_kernel_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("APP_DEBUG", raising=False)
 
     assert Kernel(APP, env="dev").debug
+    assert Kernel(APP, env="test").debug
+
+
+def test_debug_defaults_to_off_for_prod_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    monkeypatch.delenv("APP_DEBUG", raising=False)
+
     assert not Kernel(APP, env="prod").debug
+    assert len(recwarn) == 0
 
 
-def test_debug_reads_app_debug(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_debug_defaults_to_off_for_an_environment_the_kernel_does_not_name(
+    environment: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APP_DEBUG", raising=False)
+
+    with pytest.warns(RuntimeWarning, match="is not one the kernel names") as caught:
+        assert not Kernel(APP, env=environment).debug
+
+    message = str(caught[0].message)
+    assert environment in message
+    assert "APP_DEBUG=1" in message
+    assert "debug=" in message
+
+
+def test_the_debug_default_warning_fires_once_per_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APP_DEBUG", raising=False)
+
+    with pytest.warns(RuntimeWarning):
+        assert not Kernel(APP, env="staging").debug
+
+    # The guard is module-level: a second kernel in the same environment stays silent.
+    assert not Kernel(APP, env="staging").debug
+
+
+def test_an_explicit_debug_wins_over_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_DEBUG", raising=False)
+
+    assert Kernel(APP, env="prod", debug=True).debug
+    assert not Kernel(APP, env="dev", debug=False).debug
+
+
+def test_debug_reads_app_debug(
+    monkeypatch: pytest.MonkeyPatch,
+    recwarn: pytest.WarningsRecorder,
+) -> None:
     monkeypatch.setenv("APP_DEBUG", "0")
-
     assert not Kernel(APP, env="dev").debug
+
+    monkeypatch.setenv("APP_DEBUG", "1")
+    assert Kernel(APP, env="prod").debug
+
+    assert len(recwarn) == 0
+
+
+def test_a_garbage_app_debug_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "maybe")
+
+    with pytest.raises(InvalidEnvironmentVariableError):
+        _ = Kernel(APP, env="dev").debug
 
 
 def test_an_explicit_name_wins() -> None:
@@ -128,8 +201,10 @@ def test_with_env_keeps_the_recipe_for_another_environment() -> None:
 
 
 def test_a_disallowed_environment_is_refused() -> None:
+    # debug=False keeps the test on the environment refusal, past the
+    # once-per-process warning "qa" would otherwise raise first.
     with pytest.raises(InvalidEnvironmentError):
-        _ = _kernel(env="qa", allowed_envs=("dev", "prod")).build()
+        _ = _kernel(env="qa", allowed_envs=("dev", "prod"), debug=False).build()
 
 
 async def test_the_built_container_provides_the_app_and_bundle_services() -> None:
