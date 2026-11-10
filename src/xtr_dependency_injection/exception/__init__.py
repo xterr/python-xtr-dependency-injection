@@ -11,6 +11,7 @@ from __future__ import annotations
 from .builder_frozen_error import BuilderFrozenError
 from .builder_phase_error import BuilderPhaseError
 from .bundle_definition_error import BundleDefinitionError
+from .cache_file_write_error import CacheFileWriteError
 from .circular_bundle_dependency_error import CircularBundleDependencyError
 from .config_provider_error import ConfigProviderError
 from .conflicting_config_providers_error import ConflictingConfigProvidersError
@@ -47,6 +48,7 @@ __all__ = [
     "BuilderFrozenError",
     "BuilderPhaseError",
     "BundleDefinitionError",
+    "CacheFileWriteError",
     "CircularBundleDependencyError",
     "ConfigProviderError",
     "ConflictingConfigProvidersError",

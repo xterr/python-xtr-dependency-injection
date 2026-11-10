@@ -102,3 +102,17 @@ Where the order of collected services matters, the application controls it with
 descending, with `before` / `after` breaking ties. A contradiction, an unsatisfiable bound or a
 cycle is a `ServiceOrderError`. A library collecting a `Sequence[T]` therefore gets a
 deterministic order without doing anything itself.
+
+## Cache warmers and clearers
+
+The kernel bundle already tags every service inheriting `CacheWarmerInterface` with
+`kernel.cache_warmer` and every one inheriting `CacheClearerInterface` with
+`kernel.cache_clearer`, and runs them through its `CacheWarmerAggregate` and `ChainCacheClearer`:
+the warmers that are not optional when it boots with a cold cache — no `.warmed` stamp for this
+build in `kernel.cache_dir` — and every one on `cache:warmup` and `cache:clear`. A bundle only
+registers its warmer, or tags a service that does not inherit the interface, with a `priority`
+when the order matters:
+
+```python
+        _ = services.set(RoutesWarmer).add_tag("kernel.cache_warmer", priority=10)
+```

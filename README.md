@@ -426,7 +426,8 @@ class MailConfig:
 
 **Parameters** are values injected with `Annotated[str, Autowire(param="...")]`. The kernel
 provides `kernel.name`, `kernel.package`, `kernel.environment`, `kernel.debug`, `kernel.project_dir`,
-`kernel.share_dir` and `kernel.bundles` (a mapping of bundle name to `module:Class`); bundles
+`kernel.share_dir`, `kernel.cache_dir`, `kernel.build_dir` and `kernel.bundles` (a mapping of
+bundle name to `module:Class`); bundles
 add theirs with
 `builder.set_parameter(name, value)`, the application with `@parameters`. They merge into
 nested mappings and never override: a leaf set twice is a `ParameterConflictError` naming
@@ -437,6 +438,11 @@ cache files, lock files: `var/share` in the project directory. It belongs to who
 project, so no other user of the machine can have created it first, as anyone can in the
 system's temporary directory. Keep `var/` out of version control; nothing is created until
 something writes there.
+
+`kernel.cache_dir` is the environment's cache: `var/cache/<environment>` in the project
+directory, one per environment, everything in it rebuildable. `kernel.build_dir` is where what
+is only ever read goes; it is the cache directory itself. Neither is created until something
+writes there — see [Cache warmers and clearers](#cache-warmers-and-clearers).
 
 ```python
 from typing import Annotated
@@ -677,6 +683,7 @@ in scan order.
 | | 100 | `RemoveMissingDependenciesPass` | Drops `@remove_if_missing` services whose peer is absent |
 | | -32 | `ResettableServicePass` (kernel bundle) | Checks every `kernel.reset` names an existing method |
 | | -10000 | every bundle overriding `process` | Bundle order |
+| | -10000 | `AddCacheWarmerPass`, `AddCacheClearerPass` (kernel bundle) | Hand every `kernel.cache_warmer` / `kernel.cache_clearer` service to the aggregate, by tag `priority` |
 | `OPTIMIZE` | 0 | `ResolveParameterPlaceHoldersPass` | Resolves `%name%` references in the parameters and definition arguments |
 | | 0 | `ValidateEnvPlaceholdersPass` | Refuses an unknown prefix, or a non-scalar placeholder embedded in a string |
 | | 0 | `DecoratorServicePass` | Resolves decorations by priority, applies `on_invalid` |
@@ -999,7 +1006,8 @@ build()     environment → bundles → early scan → build() of every bundle �
             configs (default → app base → alias_of → prepends → app transforms) →
             load_extension → late scan → app-marked definitions (the merge pass) →
             compiler passes by stage → compile
-boot()      bundle.boot() in order → @on_boot (priority, then scan order)
+boot()      bundle.boot() in order — the kernel's first, warming a cold cache →
+            @on_boot (priority, then scan order)
 shutdown()  @on_shutdown → bundle.shutdown() in reverse → container.close()
 ```
 
@@ -1049,6 +1057,52 @@ bound or cycle raises `ServiceOrderError`. An alias takes its target's place: ta
 collected through `@as_alias(Base, qualifier=...)` come out of `Sequence[Base]` and
 `Mapping[Hashable, Base]` in the order their classes were given, whatever order the aliases
 were declared in.
+
+### Cache warmers and clearers
+
+A **cache warmer** fills part of the cache ahead of its first use; a **cache clearer** empties a
+cache that removing `kernel.cache_dir` does not reach — one on a server, or in a directory of its
+own. The core bundle tags every service explicitly inheriting `CacheWarmerInterface` with
+`kernel.cache_warmer`, and every one inheriting `CacheClearerInterface` with
+`kernel.cache_clearer`, and registers a `CacheWarmerAggregate` and a `ChainCacheClearer` that run
+them in order — the tag's `priority` attribute, highest first, then registration order. A bundle
+tags a service explicitly with `services.set(X).add_tag("kernel.cache_warmer", priority=10)`.
+
+**The kernel warms a cold cache when it boots**, before any other bundle boots: the warmers that
+are not optional run once, and `WarmedCache` writes a stamp — `.warmed` in `kernel.cache_dir` —
+naming the build they ran for. Every later start reads that stamp and runs nothing. The cache is
+cold when there is no stamp (the first start, or the first after `cache:clear --no-warmup`), or
+when the stamp names another build: another environment or debug flag, or a warmer added,
+removed, or whose module was written since — an upgrade, or an edit. Anything else a warmer reads
+is not tracked: run `cache:clear` when it changes. One process at a time warms, under a file lock
+in the cache directory; another starting meanwhile waits, then finds the cache warm. An
+application without warmers touches nothing.
+
+The console bundle's `cache:warmup` and `cache:clear` commands run the warmers on demand — as a
+deploy step, so the first start does not pay for it — and write the stamp when they are done.
+
+A warmer that is **optional** — its cache can also be filled bit by bit, on first use — runs only
+once `enable_optional_warmers()` is called, which `cache:warmup` does unless told not to. A warmer
+writing files subclasses `CacheWarmer`, whose `_write_cache_file` replaces a file in one step, so
+a process reading the cache meanwhile never sees half of one:
+
+```python
+from pathlib import Path
+
+from xtr_dependency_injection import CacheWarmer, as_service
+
+
+@as_service
+class RoutesWarmer(CacheWarmer):
+    async def warm_up(self, cache_dir: Path, build_dir: Path | None = None) -> None:
+        self._write_cache_file(cache_dir / "routes.json", "{}")
+
+    def is_optional(self) -> bool:
+        return True
+```
+
+The kernel and the commands create `kernel.cache_dir` before warming; a warmer creates any
+directory below it that it writes into.
 
 ## FastAPI
 
@@ -1274,6 +1328,7 @@ Everywhere else, the public API stays behind `ContainerInterface`.
 | Parameter and target injection | `Autowire(param=...)` / `Target(name)` | Inject a parameter, or select a qualified service |
 | Tag collections | `Sequence[T]` / `Mapping[Hashable, T]` / `ServiceLocator[T]` | Inject every tagged service — eagerly, or lazily by name |
 | Reset between messages | `builder.register_for_autoconfiguration(ResetInterface).add_tag("kernel.reset", method="reset")` | Rebind stateful services per message |
+| Cache warm-up and clearing | `CacheWarmerInterface` / `CacheClearerInterface`, run by `CacheWarmerAggregate` / `ChainCacheClearer` | Fill the cache ahead of use; empty caches outside `kernel.cache_dir` |
 | Lifecycle | `async Bundle.boot()` / `async Bundle.shutdown()` reading `self.container`; `@on_boot` / `@on_shutdown` | Async startup and cleanup |
 | Unit of work | `unit_of_work(container)` / `current_unit_of_work()` | One scope shared by everything done for one piece of work |
 | Container access | `xtr_service_contracts.ContainerInterface` — kernel-provided | Get / has by type plus qualifier, plus named parameters |
@@ -1318,6 +1373,7 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | Error | Raised when |
 |---|---|
 | `BundleDefinitionError` | A bad `@as_bundle` / `@required_bundle`, a reserved name, a bundle or config not buildable with no arguments, two bundles sharing a config type, a bad `"module:Class"` target |
+| `CacheFileWriteError` | `CacheWarmer._write_cache_file` could not write its file; the filesystem's error is its `__cause__` |
 | `DuplicateBundleError` | Two bundles share a name |
 | `MissingBundleError` | A required bundle is absent, skipped, excluded or disabled, or a listed bundle is active where its package is not installed |
 | `CircularBundleDependencyError` | Bundle dependencies loop |

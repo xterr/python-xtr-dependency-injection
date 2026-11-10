@@ -17,6 +17,14 @@ from .builder.container_builder import ContainerBuilder
 from .builder.named_factory import named_factory
 from .builder.service_configurator import ServiceConfigurator
 from .bundle import Bundle, BundleMetadata, NoConfig, RequiredBundle, as_bundle, required_bundle
+from .cache_clearer import CacheClearerInterface, ChainCacheClearer
+from .cache_warmer import (
+    CacheWarmer,
+    CacheWarmerAggregate,
+    CacheWarmerInterface,
+    WarmableInterface,
+    WarmedCache,
+)
 from .compiler.before_after_sorter import sort_with_priorities
 from .compiler.compiler_pass_interface import CompilerPassInterface
 from .compiler.pass_stage import PassStage
@@ -72,6 +80,11 @@ __all__ = [
     "BootedKernel",
     "Bundle",
     "BundleMetadata",
+    "CacheClearerInterface",
+    "CacheWarmer",
+    "CacheWarmerAggregate",
+    "CacheWarmerInterface",
+    "ChainCacheClearer",
     "CompiledKernel",
     "CompilerPassInterface",
     "ContainerBagInterface",
@@ -99,6 +112,8 @@ __all__ = [
     "ServiceLocator",
     "ServicesResetter",
     "Target",
+    "WarmableInterface",
+    "WarmedCache",
     "__version__",
     "as_alias",
     "as_bundle",

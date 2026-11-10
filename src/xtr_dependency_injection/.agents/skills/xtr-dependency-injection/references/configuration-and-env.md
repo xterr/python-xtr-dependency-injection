@@ -53,7 +53,8 @@ environment.
 ## Parameters
 
 Named values injected by key. The kernel provides `kernel.name`, `kernel.package`, `kernel.environment`,
-`kernel.debug`, `kernel.project_dir`, `kernel.share_dir` and `kernel.bundles`; bundles add
+`kernel.debug`, `kernel.project_dir`, `kernel.share_dir`, `kernel.cache_dir`,
+`kernel.build_dir` and `kernel.bundles`; bundles add
 theirs; the application adds its own:
 
 ```python
@@ -84,6 +85,8 @@ class Site:
   both sources.
 - `kernel.share_dir` (`var/share` under the project) is where one application's processes
   share files. Keep `var/` out of version control.
+- `kernel.cache_dir` (`var/cache/<environment>` under the project) is the environment's
+  rebuildable cache; `kernel.build_dir`, for what is only ever read, is the same directory.
 - At runtime a service reads the compiled parameters by injecting `ContainerBagInterface`.
 
 ### `%name%` references

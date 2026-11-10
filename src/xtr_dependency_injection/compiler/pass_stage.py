@@ -8,8 +8,15 @@ by priority descending, ties by registration order.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Final
 
-__all__ = ["PassStage"]
+__all__ = ["BUNDLE_PASS_PRIORITY", "PassStage"]
+
+BUNDLE_PASS_PRIORITY: Final = -10000
+"""Where a bundle overriding ``process`` runs: last in ``BEFORE_OPTIMIZATION``.
+
+The later stages still run after it.
+"""
 
 
 class PassStage(Enum):

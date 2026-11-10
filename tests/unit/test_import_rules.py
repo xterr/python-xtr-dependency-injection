@@ -25,6 +25,8 @@ ALLOWED: dict[str, set[str]] = {
         "compiler.pass_stage",
     },
     "bundle": {"exception", "diagnostics"},
+    "cache_clearer": set(),
+    "cache_warmer": {"exception"},
     "runtime": {
         "exception",
         "builder.definition",
@@ -43,6 +45,8 @@ ABOVE_EVERYTHING = {"integration", "kernel", "testing"}
 # compiler/ itself, and none may import wireup. Every other compiler module
 # keeps ALLOWED above.
 _PASS_MODULE_IMPORTS: dict[str, set[str]] = {
+    "add_cache_clearer_pass": {"cache_clearer"},
+    "add_cache_warmer_pass": {"cache_warmer"},
     "attribute_autoconfiguration_pass": {"builder._origins", "builder.definition"},
     "autowire_as_decorator_pass": {
         "builder._origins",

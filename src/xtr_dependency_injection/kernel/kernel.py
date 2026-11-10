@@ -42,7 +42,7 @@ from xtr_dependency_injection.bundle.bundle_resolver import ListedBundles, resol
 from xtr_dependency_injection.compiler.merge_extension_configuration_pass import (
     MergeExtensionConfigurationPass,
 )
-from xtr_dependency_injection.compiler.pass_stage import PassStage
+from xtr_dependency_injection.compiler.pass_stage import BUNDLE_PASS_PRIORITY, PassStage
 from xtr_dependency_injection.compiler.priority_tagged_service import by_priority
 from xtr_dependency_injection.compiler.wireup_compiler import (
     Decoration,
@@ -72,6 +72,7 @@ from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
 
 from ._bundle_list import load_bundle_list
 from .booted_kernel import BootedKernel, call_injected
+from .cache_dir import cache_dir
 from .compiled_kernel import CompiledKernel
 from .kernel_bundle import KernelBundle
 from .share_dir import share_dir
@@ -91,12 +92,6 @@ __all__ = [
     "definition_reports",
     "prepare",
 ]
-
-BUNDLE_PASS_PRIORITY: Final = -10000
-"""Where a bundle overriding ``process`` runs: last in ``BEFORE_OPTIMIZATION``.
-
-The later stages still run after it.
-"""
 
 _DEBUG_ENVS: Final = frozenset({"dev", "test"})
 # The two environments the kernel itself names — "dev" is its own default
@@ -605,11 +600,14 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
     """Register the ``kernel.*`` parameters into ``state`` before any bundle's ``build`` runs.
 
     The kernel exposes ``kernel.name``, ``kernel.package``, ``kernel.environment``,
-    ``kernel.debug``, ``kernel.project_dir``, ``kernel.share_dir`` and
-    ``kernel.bundles`` (name → class) from the very beginning of the container
-    build; every bundle's hook may read them.
+    ``kernel.debug``, ``kernel.project_dir``, ``kernel.share_dir``,
+    ``kernel.cache_dir``, ``kernel.build_dir`` and ``kernel.bundles``
+    (name → class) from the very beginning of the container build; every
+    bundle's hook may read them. ``kernel.build_dir``, where what is only ever
+    read goes, is the cache directory itself.
     """
     bundles_map = {type(bundle).metadata().name: qualified_name(type(bundle)) for bundle in bundles}
+    environment_cache = str(cache_dir(project_dir, environment))
     state.add_parameters(
         Origin("kernel", KERNEL_BUNDLE),
         {
@@ -620,6 +618,8 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
                 "debug": debug,
                 "project_dir": str(project_dir),
                 "share_dir": str(share_dir(project_dir)),
+                "cache_dir": environment_cache,
+                "build_dir": environment_cache,
                 "bundles": bundles_map,
             }
         },

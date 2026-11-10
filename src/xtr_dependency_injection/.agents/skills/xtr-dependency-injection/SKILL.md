@@ -27,6 +27,7 @@ Writing a bundle for a library is a different job: load the skill
 | Inject a variable | `Annotated[int, Autowire(env="int:PORT")]` |
 | Read a variable in config | `env("SMTP_HOST")`, `env("PORT", int, default=25)` |
 | Run code at startup | `@on_boot` / `@on_shutdown` |
+| Fill or empty a cache | a service inheriting `CacheWarmerInterface` / `CacheClearerInterface`; boot warms a cold cache once, `cache:warmup` / `cache:clear` on demand |
 | Share a scope | `async with unit_of_work(container) as unit:` |
 | Read the served request | `request: Request` in a route, `Injected[ServerRequestInterface]` in a route or service |
 | Boot it | `kernel.run(main)`, `await kernel.boot()`, or `setup(app, kernel)` for HTTP |
