@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextvars
 from collections.abc import (
     AsyncIterator,  # noqa: TC003 — the engine reads the factory's return annotation
 )
 from typing import TYPE_CHECKING, TypeVar, final
 
+import anyio
 import pytest
 import wireup
 from typing_extensions import override
@@ -239,6 +241,39 @@ async def test_the_unit_reads_the_container_s_services_and_parameters() -> None:
         assert unit.has(Session)
         assert unit.get_parameter("app.name") == "shop"
         assert unit.has_parameter("app")
+
+
+async def test_a_unit_that_has_exited_is_gone_from_a_context_copied_inside_it() -> None:
+    container = _container()
+
+    async with unit_of_work(container):
+        kept = contextvars.copy_context()
+
+    assert kept.run(current_unit_of_work) is None
+
+
+async def test_work_that_outlives_the_unit_it_started_in_opens_one_of_its_own() -> None:
+    container = _container()
+    exited = anyio.Event()
+    first: list[Session] = []
+    handed: list[tuple[Session, bool]] = []
+
+    async def later() -> None:
+        # Started inside the unit, so its context carries it; run once it is over.
+        await exited.wait()
+        async with unit_of_work(container) as unit:
+            session = await unit.get(Session)
+            handed.append((session, session.closed))
+
+    async with anyio.create_task_group() as tasks:
+        async with unit_of_work(container) as unit:
+            first.append(await unit.get(Session))
+            _ = tasks.start_soon(later)
+        exited.set()
+
+    # Joining the unit that exited would have handed out its released session.
+    assert handed[0][0] is not first[0]
+    assert handed[0][1] is False
 
 
 async def test_a_container_no_kernel_built_is_refused() -> None:

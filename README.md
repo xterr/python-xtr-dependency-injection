@@ -934,6 +934,9 @@ async with unit_of_work(container) as unit:
   container opened — a second kernel's — is never joined: this container opens its own, inside. The container it
   yields resolves scoped services as well as singletons.
 - `current_unit_of_work()` returns the open unit's container, or `None` outside one.
+- A unit is open only until it exits. A task started inside one and still running after it — or
+  anything else holding a copy of the context it was open in — finds no unit there, and opens
+  one of its own rather than being handed services the unit has already released.
 - A call `bind_callable` bound without `per_call_scope` joins the unit its container has open
   where it is made: its `Injected[...]` scoped parameters, and a class target, come from the
   unit. Outside one it behaves as it always has. A `per_call_scope=True` call keeps a scope of
