@@ -3,7 +3,7 @@
 Kept apart from the seam module deliberately: the markers' base lazily
 derives resolvers from :func:`provider`, so this module must never reach the
 kernel machinery — it only reads what the seam's ``attach`` stored on the
-application and enters the scope :func:`request_scope` opens.
+application and what :func:`request_scope` parked on the connection.
 """
 
 from __future__ import annotations
@@ -27,9 +27,10 @@ if TYPE_CHECKING:
     from typing import Literal
 
     from starlette.applications import Starlette
+    from starlette.types import Scope
     from wireup import ScopedAsyncContainer
 
-__all__ = ["current_connection", "provider", "request_scope"]
+__all__ = ["connection_of", "current_connection", "provider", "request_scope"]
 
 NO_KERNEL: Final = (
     "this route asks the container for a dependency, but no kernel serves "
@@ -51,23 +52,51 @@ NO_CONNECTION: Final = (
 STATE_KEY: Final = "_xtr_dependency_injection"
 """Where the seam's ``attach`` stores the kernel on the application's state."""
 
-_SCOPED: Final[ContextVar[ScopedAsyncContainer | None]] = ContextVar(
-    "xtr_request_scope", default=None
-)
-"""The scope of the request being served, set by :func:`request_scope`."""
+SERVED_KEY: Final = "_xtr_dependency_injection_served"
+"""Where :func:`request_scope` parks what it serves, on the connection's own scope.
 
-_CONNECTION: Final[ContextVar[HTTPConnection | None]] = ContextVar(
-    "xtr_current_connection", default=None
-)
-"""The connection the request being served is resolved against.
+The scope a server builds for one connection is the one thing that is that
+connection's and no other's: the framework hands it to every resolver, and no
+task holds another connection's by accident — whereas the context a task
+starts with may be a copy of an earlier request's. So what a request is
+resolved against is found there, never in what the running context carries.
+"""
 
-Every resolver publishes the one the framework handed it, so the per-request
-factory of an integration package can read it through
-:func:`current_connection` — the container fills no request parameter of its
-own, because the framework fills those only for what it calls itself.
 
-A resolver publishes only once its own guards have passed: one that could not
-resolve served nothing, and must leave nothing behind for the next read.
+@final
+class _Served:
+    """What one request scope serves: its container scope, and the connection published in it.
+
+    Every resolver publishes the connection the framework handed it, so the
+    per-request factory of an integration package can read the framework's
+    own request object — the container fills no request parameter of its
+    own, because the framework fills those only for what it calls itself.
+
+    Published by changing this record, never the context: a synchronous
+    endpoint in a copied context and a task the request started read the one
+    record, and nothing a resolver publishes outlives the scope. It is
+    emptied when the scope exits, so a context that outlasts the request, or
+    that another request was started from, reads nothing of it.
+    """
+
+    __slots__ = ("connection", "scoped")
+
+    def __init__(self, scoped: ScopedAsyncContainer, connection: HTTPConnection | None) -> None:
+        self.scoped: ScopedAsyncContainer | None = scoped
+        self.connection = connection
+
+    def close(self) -> None:
+        """Forget the scope and the connection: the request is over."""
+        self.scoped = None
+        self.connection = None
+
+
+_SERVED: Final[ContextVar[_Served | None]] = ContextVar("xtr_served_request", default=None)
+"""What the request scope open in this context serves, bound by :func:`request_scope`.
+
+Only for what has no connection in hand — a factory the container runs. It is
+bound when the scope opens and set nowhere else, so what it answers is the
+request whose scope is open here, not whatever the context held before.
 """
 
 _PROVIDERS: Final[dict[tuple[str, object, object], Callable[..., Awaitable[object]]]] = {}
@@ -104,41 +133,73 @@ def attached_kernel(app: Starlette) -> AttachedKernel | None:
     return attached if isinstance(attached, AttachedKernel) else None
 
 
-def request_scope(app: Starlette) -> AbstractAsyncContextManager[None]:
-    """Open the container scope one request's scoped services live in.
+def request_scope(app: Starlette, connection_scope: Scope) -> AbstractAsyncContextManager[None]:
+    """Open the container scope the request ``connection_scope`` describes is served in.
 
-    While the returned context is entered, the ``service`` resolvers of this
-    module resolve from the scope, and it is the unit of work what the request
-    starts joins — a message it dispatches shares its scoped services. It
-    closes — and the resolvers stop — when the context exits, even when the
-    body raises.
+    While the returned context is entered, the resolvers of this module
+    resolve that connection's markers from the scope, and it is the unit of
+    work what the request starts joins — a message it dispatches shares its
+    scoped services. It closes — and the resolvers stop — when the context
+    exits, even when the body raises.
+
+    The request owns only what it opened. A server may start a request's task
+    from the context of an earlier one, so nothing the calling context
+    carries is taken for this request's: only a scope already open on this
+    very connection encloses the new one, and the connection published in it
+    stays readable inside.
+
+    Args:
+        app: The application whose attached kernel serves the request.
+        connection_scope: The connection as the server described it.
 
     Raises:
         FastapiIntegrationError: On enter, if no kernel is attached to
             ``app``.
     """
-    return _request_scope(app)
+    return _request_scope(app, connection_scope)
 
 
 @asynccontextmanager
-async def _request_scope(app: Starlette) -> AsyncGenerator[None, None]:
+async def _request_scope(app: Starlette, connection_scope: Scope) -> AsyncGenerator[None, None]:
     attached = attached_kernel(app)
     if attached is None:
         raise FastapiIntegrationError(NO_KERNEL)
+    # Read off the connection, not the context: only a scope opened on this
+    # connection encloses this one.
+    enclosing = _served_of(connection_scope)
     async with attached.engine.enter_scope() as scoped:
-        token = _SCOPED.set(scoped)
-        # Setting the variable to the value it already holds changes nothing:
-        # the set is taken for its token, and resetting that token at exit
-        # restores whatever was published before this scope opened. Publishing
-        # ``None`` instead would take the value away from a nested scope that
-        # publishes none of its own, which still belongs to the outer request.
-        published = _CONNECTION.set(_CONNECTION.get())
+        served = _Served(scoped, enclosing.connection if enclosing is not None else None)
+        connection_scope[SERVED_KEY] = served
+        bound = _SERVED.set(served)
         try:
             with entered(attached.engine, scoped):
                 yield
         finally:
-            _CONNECTION.reset(published)
-            _SCOPED.reset(token)
+            _SERVED.reset(bound)
+            served.close()
+            if enclosing is None:
+                del connection_scope[SERVED_KEY]
+            else:
+                connection_scope[SERVED_KEY] = enclosing
+
+
+def connection_of(connection_scope: Scope) -> HTTPConnection | None:
+    """Return the connection a marker of the request ``connection_scope`` describes published.
+
+    Part of the seam, for an integration that holds the connection's scope:
+    what it reads is that request's by construction, whatever context it is
+    called from — where :func:`current_connection` answers for the request
+    whose scope is open in the calling context.
+
+    Args:
+        connection_scope: The connection as the server described it.
+
+    Returns:
+        The connection the framework serves that request from, or ``None``
+        when no scope is open on it or no marker of it has resolved.
+    """
+    served = _served_of(connection_scope)
+    return served.connection if served is not None else None
 
 
 def current_connection() -> HTTPConnection:
@@ -152,16 +213,17 @@ def current_connection() -> HTTPConnection:
     parsed form. Building the injected request from that object makes it share
     those reads instead of consuming the wire a second time. In a route, take
     the framework's ``request: Request``; for the request as a message, take
-    a ``ServerRequestInterface`` parameter.
+    a ``ServerRequestInterface`` parameter. An integration that holds the
+    connection's scope reads :func:`connection_of` instead.
 
     On a WebSocket route the object is the ``WebSocket`` — the connection
     class a request and a socket share is what a resolver is handed, whichever
     is being served.
 
-    It stays readable for as long as the request's scope is open, and that
-    outlasts the response: a background task the framework runs once the
-    response has gone out still reads the connection of the request that
-    queued it.
+    It is readable from the moment a marker of the request resolved until the
+    request's scope exits, and that outlasts the response: a background task
+    the framework runs once the response has gone out still reads the
+    connection of the request that queued it.
 
     Only something built for this request may read it — a
     ``lifetime="scoped"`` or transient service, or a factory of one. A
@@ -175,7 +237,8 @@ def current_connection() -> HTTPConnection:
         FastapiIntegrationError: If no marker of a served request has
             resolved, so there is no connection to read.
     """
-    connection = _CONNECTION.get()
+    served = _SERVED.get()
+    connection = served.connection if served is not None else None
     if connection is None:
         raise FastapiIntegrationError(NO_CONNECTION)
     return connection
@@ -191,9 +254,9 @@ def provider(
     One callable per ``(kind, key, qualifier)``: the framework tells route
     dependencies apart by the callable it was handed, and two equal markers
     must carry the same resolver to stay equal and hashable. A ``service``
-    resolver reads the scope :func:`request_scope` opened; a ``param`` or
-    ``env`` resolver reads the container the seam's ``attach`` stored on the
-    application the connection belongs to.
+    resolver reads the scope :func:`request_scope` parked on the connection
+    it is handed; a ``param`` or ``env`` resolver reads the container the
+    seam's ``attach`` stored on the application the connection belongs to.
     """
     cache_key = (kind, key, qualifier)
     cached = _PROVIDERS.get(cache_key)
@@ -220,11 +283,11 @@ def _service_resolver(
     """Build the resolver of one service injection, named ``name``."""
 
     async def resolve(request: HTTPConnection) -> object:
-        scoped = _SCOPED.get()
-        if scoped is None:
+        served = _served_of(request.scope)
+        if served is None or served.scoped is None:
             raise FastapiIntegrationError(NO_SCOPE)
-        _ = _CONNECTION.set(request)
-        return await scoped.get(service, qualifier)
+        served.connection = request
+        return await served.scoped.get(service, qualifier)
 
     resolve.__name__ = name
     resolve.__qualname__ = name
@@ -238,7 +301,7 @@ def _param_resolver(param: str, name: str) -> Callable[[HTTPConnection], Awaitab
 
     async def resolve(request: HTTPConnection) -> object:
         container = _connection_container(request)
-        _ = _CONNECTION.set(request)
+        _publish(request)
         return await container.resolve_env_placeholders(container.get_parameter_raw(param))
 
     resolve.__name__ = name
@@ -253,7 +316,7 @@ def _env_resolver(expression: str, name: str) -> Callable[[HTTPConnection], Awai
 
     async def resolve(request: HTTPConnection) -> object:
         container = _connection_container(request)
-        _ = _CONNECTION.set(request)
+        _publish(request)
         return await container.get_env(expression)
 
     resolve.__name__ = name
@@ -261,6 +324,25 @@ def _env_resolver(expression: str, name: str) -> Callable[[HTTPConnection], Awai
     # ``set_dependency`` tells an already-derived resolver apart by this flag.
     resolve.__dict__["__xtr_provider__"] = True
     return resolve
+
+
+def _served_of(connection_scope: Scope) -> _Served | None:
+    """Return what the request scope open on ``connection_scope`` serves, if one is open."""
+    served: object = connection_scope.get(SERVED_KEY)
+    return served if isinstance(served, _Served) and served.scoped is not None else None
+
+
+def _publish(request: HTTPConnection) -> None:
+    """Publish ``request`` in the scope open on its connection.
+
+    Only once the resolver's own guards have passed: one that could not
+    resolve served nothing, and must leave nothing behind for the next read.
+    Without a scope open on the connection there is nothing to publish into,
+    and nothing built for the request to read it.
+    """
+    served = _served_of(request.scope)
+    if served is not None:
+        served.connection = request
 
 
 def _connection_container(request: HTTPConnection) -> KernelContainer:

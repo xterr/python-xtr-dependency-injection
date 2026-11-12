@@ -94,7 +94,7 @@ class ScopePerRequest:
         self._app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        async with request_scope(self._app):
+        async with request_scope(self._app, scope):
             await self._app(scope, receive, send)
 
 

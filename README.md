@@ -1158,16 +1158,26 @@ kernel and runs the boot hooks inside the app's lifespan. The seam it builds on 
 - `attach(app, compiled)` stores a compiled kernel's container on the application so the route
   resolvers can read it; `detach(app)` removes it, and attaching a second kernel without
   detaching the first is a `FastapiIntegrationError`.
-- `request_scope(app)` opens the container scope a request's scoped services live in, for the
-  span of that request.
+- `request_scope(app, connection_scope)` opens the container scope a request's scoped services
+  live in, for the span of that request, on the request's own connection — the scope the server
+  built for it.
 - `provider(...)` derives the resolver a marker turns into.
 - `current_connection()` returns the framework's own request object for the request being
   served — the one the body, the form and the parsed JSON are cached on — so a per-request
   factory in an integration package can build from it and share the reads the framework has
   already made instead of consuming the wire a second time.
+- `connection_of(connection_scope)` returns that same object to whoever holds the connection's
+  scope, or `None` until a marker of that request has resolved.
 
 These exist for an entry point such as xtr-http-kernel to build on; an application uses
 `setup` and the markers, nothing lower.
+
+A request is resolved against what was opened on its own connection, never against what the
+running context carries. A server gives no promise about the context a request's task starts
+with — on a kept-alive connection it can be a copy of an earlier request's — so a marker finds
+its scope on the connection the framework hands it, the connection a resolver publishes lands
+in that scope and nowhere else, and nothing a request published is readable once its scope has
+exited. A request started from another one's context starts with nothing of that request.
 
 `current_connection()` is plumbing of that same kind, and application code does not call it. A
 service the container builds for a request is built by the container, not by the framework, so

@@ -92,6 +92,7 @@ PUBLIC = {
 # build on; an application reaches for its setup call and the markers instead.
 SEAM = {
     "attach",
+    "connection_of",
     "current_connection",
     "detach",
     "provider",

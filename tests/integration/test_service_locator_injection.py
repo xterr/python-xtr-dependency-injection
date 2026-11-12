@@ -252,7 +252,7 @@ async def test_a_served_route_resolves_the_locator_through_the_marker() -> None:
     # What the framework hands a resolver for a request of this application.
     connection = HTTPConnection({"type": "http", "app": app})
 
-    async with request_scope(app):
+    async with request_scope(app, connection.scope):
         handlers = cast("ServiceLocator[Handler]", await resolve(connection))
 
     assert list(handlers.provided_services()) == ["auth", "log"]
