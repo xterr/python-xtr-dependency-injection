@@ -942,7 +942,8 @@ async with unit_of_work(container) as unit:
   unit. Outside one it behaves as it always has. A `per_call_scope=True` call keeps a scope of
   its own, inside a unit or not, and that scope is the unit of what the call starts — a message
   a command dispatches shares the command's scoped services. So is a request's scope, for what
-  the request starts.
+  the request starts. A message a worker receives is not something the command running that
+  worker started: the worker handles it apart, and nothing it does joins the command's unit.
 
 A library opens a unit around what it runs for one piece of work — the message bus does, per
 message — and a service that needs "the one for this unit" resolves it from
