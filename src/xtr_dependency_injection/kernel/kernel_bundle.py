@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, final
 
 from typing_extensions import override
 from wireup import AsyncContainer
-from xtr_service_contracts import ContainerInterface, ResetInterface
+from xtr_service_contracts import ContainerInterface, ResetInterface, UnitParticipantInterface
 
 from xtr_dependency_injection.bundle import KERNEL_BUNDLE, Bundle, BundleMetadata, NoConfig
 from xtr_dependency_injection.bundle.as_bundle import declare_bundle
@@ -50,8 +50,10 @@ from xtr_dependency_injection.compiler.resettable_service_pass import (
     RESET_TAG,
     ResettableServicePass,
 )
+from xtr_dependency_injection.compiler.unit_participant_pass import UnitParticipantPass
 from xtr_dependency_injection.parameter_bag.container_bag import ContainerBag
 from xtr_dependency_injection.parameter_bag.container_bag_interface import ContainerBagInterface
+from xtr_dependency_injection.runtime._unit_scope import UnitParticipants
 from xtr_dependency_injection.runtime.env_var_loader_interface import EnvVarLoaderInterface
 from xtr_dependency_injection.runtime.env_var_processor_interface import EnvVarProcessorInterface
 from xtr_dependency_injection.runtime.scope_factory import ScopeFactory
@@ -125,6 +127,19 @@ async def chain_cache_clearer(
     return ChainCacheClearer([await clearers.get(name) for name in clearer_names])
 
 
+async def unit_participants(
+    participants: ServiceLocator[UnitParticipantInterface], participant_names: Sequence[str]
+) -> UnitParticipants:
+    """Provide every ``kernel.unit_participant`` service, in the order they are told.
+
+    Args:
+        participants: The tagged participants, built only when this is.
+        participant_names: Their qualifiers, told first first — written by
+            :class:`~xtr_dependency_injection.compiler.unit_participant_pass.UnitParticipantPass`.
+    """
+    return UnitParticipants([await participants.get(name) for name in participant_names])
+
+
 def warmed_cache(kernel: KernelInterface, parameters: ContainerBagInterface) -> WarmedCache:
     """Provide the :class:`WarmedCache` telling whether the warmers filled the cache for this build.
 
@@ -194,13 +209,14 @@ class KernelBundle(Bundle):
         ``CacheClearerInterface`` gets ``kernel.cache_warmer`` or
         ``kernel.cache_clearer``, which :class:`AddCacheWarmerPass` and
         :class:`AddCacheClearerPass` collect after every bundle's ``process``
-        hook has run.
+        hook has run; :class:`UnitParticipantPass` collects every
+        ``kernel.unit_participant`` service the same way.
         """
         builder.add_compiler_pass(
             ResettableServicePass(), stage=PassStage.BEFORE_OPTIMIZATION, priority=-32
         )
         builder.add_compiler_pass(CheckAliasValidityPass(), stage=PassStage.BEFORE_REMOVING)
-        for collecting_pass in (AddCacheWarmerPass(), AddCacheClearerPass()):
+        for collecting_pass in (AddCacheWarmerPass(), AddCacheClearerPass(), UnitParticipantPass()):
             builder.add_compiler_pass(
                 collecting_pass,
                 stage=PassStage.BEFORE_OPTIMIZATION,
@@ -231,6 +247,7 @@ class KernelBundle(Bundle):
         _ = services.set(container_bag)
         _ = services.set(cache_warmer_aggregate).set_argument("warmer_names", [])
         _ = services.set(chain_cache_clearer).set_argument("clearer_names", [])
+        _ = services.set(unit_participants).set_argument("participant_names", [])
         _ = services.set(warmed_cache)
 
     @override
@@ -254,7 +271,7 @@ class KernelBundle(Bundle):
             return
         cache_dir = Path(str(container.get_parameter("kernel.cache_dir")))
         build_dir = Path(str(container.get_parameter("kernel.build_dir")))
-        with cache.lock():
+        async with cache.lock():
             if cache.is_fresh():
                 return
             _create(build_dir)

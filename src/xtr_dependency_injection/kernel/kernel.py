@@ -64,6 +64,7 @@ from xtr_dependency_injection.exception import (
 )
 from xtr_dependency_injection.exception._naming import key_name as _naming_key_name
 from xtr_dependency_injection.exception._naming import qualified_name
+from xtr_dependency_injection.runtime._unit_scope import building_singleton
 from xtr_dependency_injection.runtime.service_locator_injectables import (
     service_locator_injectables,
 )
@@ -139,7 +140,7 @@ class Kernel:
         exclude: Sequence[str] = (),
         default_excludes: bool = True,
         allowed_envs: Sequence[str] | None = None,
-        concurrent_scoped_access: bool = False,
+        concurrent_scoped_access: bool = True,
         environ: Mapping[str, str] | None = None,
     ) -> None:
         """Store the kernel's recipe.
@@ -171,7 +172,10 @@ class Kernel:
             allowed_envs: The only environments the kernel accepts, and the
                 only names a folder under ``config/packages/`` or
                 ``config/routes/`` may take.
-            concurrent_scoped_access: Passed to wireup.
+            concurrent_scoped_access: Whether a scoped service is built under
+                a lock, so tasks of one unit of work asking for it together
+                get the one instance; ``False`` drops the lock, for a unit
+                only ever used by one task at a time.
             environ: Where ``APP_ENV``, ``APP_DEBUG`` and every ``env(...)``
                 placeholder are read; ``None`` reads the live process
                 environment. A test gives each kernel its own.
@@ -521,7 +525,12 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
         environ=environ,
     )
     ordered = emission_order(assembly.state.store.entries(), assembly.state.forwards)
-    injectables = emit_injectables(ordered, assembly.decorations, core.resetter.track)
+    injectables = emit_injectables(
+        ordered,
+        assembly.decorations,
+        core.resetter.track,
+        singleton_guard=building_singleton if debug else None,
+    )
     injectables.extend(service_locator_injectables(ordered))
     return Prepared(
         core=core,

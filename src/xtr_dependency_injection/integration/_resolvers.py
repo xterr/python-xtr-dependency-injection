@@ -8,7 +8,7 @@ application and what :func:`request_scope` parked on the connection.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, cast, final
@@ -19,7 +19,15 @@ from starlette.requests import HTTPConnection  # noqa: TC002 — read at runtime
 from wireup import AsyncContainer
 
 from xtr_dependency_injection.exception import FastapiIntegrationError
-from xtr_dependency_injection.runtime._unit_scope import entered
+from xtr_dependency_injection.runtime._detached_variables import register_detached_variable
+from xtr_dependency_injection.runtime._scope_exit import closing_scope
+from xtr_dependency_injection.runtime._unit_scope import (
+    counted,
+    entered,
+    participants_of,
+    participating,
+    refuse_during_singleton_build,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Hashable
@@ -79,15 +87,24 @@ class _Served:
     that another request was started from, reads nothing of it.
     """
 
-    __slots__ = ("connection", "scoped")
+    __slots__ = ("connection", "container", "scoped")
 
-    def __init__(self, scoped: ScopedAsyncContainer, connection: HTTPConnection | None) -> None:
+    def __init__(
+        self,
+        scoped: ScopedAsyncContainer,
+        container: KernelContainer,
+        connection: HTTPConnection | None,
+    ) -> None:
         self.scoped: ScopedAsyncContainer | None = scoped
+        # The kernel the scope belongs to, for the parameter and environment
+        # markers: a mounted application the connection is routed into names none.
+        self.container: KernelContainer | None = container
         self.connection = connection
 
     def close(self) -> None:
         """Forget the scope and the connection: the request is over."""
         self.scoped = None
+        self.container = None
         self.connection = None
 
 
@@ -98,6 +115,8 @@ Only for what has no connection in hand — a factory the container runs. It is
 bound when the scope opens and set nowhere else, so what it answers is the
 request whose scope is open here, not whatever the context held before.
 """
+# A new connection serves no request yet, whatever context its task was copied from.
+register_detached_variable(_SERVED, None)
 
 _PROVIDERS: Final[dict[tuple[str, object, object], Callable[..., Awaitable[object]]]] = {}
 
@@ -167,20 +186,29 @@ async def _request_scope(app: Starlette, connection_scope: Scope) -> AsyncGenera
     # Read off the connection, not the context: only a scope opened on this
     # connection encloses this one.
     enclosing = _served_of(connection_scope)
-    async with attached.engine.enter_scope() as scoped:
-        served = _Served(scoped, enclosing.connection if enclosing is not None else None)
-        connection_scope[SERVED_KEY] = served
-        bound = _SERVED.set(served)
-        try:
-            with entered(attached.engine, scoped):
-                yield
-        finally:
-            _SERVED.reset(bound)
-            served.close()
-            if enclosing is None:
-                del connection_scope[SERVED_KEY]
-            else:
-                connection_scope[SERVED_KEY] = enclosing
+    participants = await participants_of(attached.engine)
+    with counted(attached.engine), participating(participants):
+        async with closing_scope(attached.engine) as scoped:
+            served = _Served(
+                scoped,
+                attached.container,
+                enclosing.connection if enclosing is not None else None,
+            )
+            connection_scope[SERVED_KEY] = served
+            bound = _SERVED.set(served)
+            try:
+                with entered(attached.engine, scoped):
+                    yield
+            finally:
+                served.close()
+                if enclosing is None:
+                    del connection_scope[SERVED_KEY]
+                else:
+                    connection_scope[SERVED_KEY] = enclosing
+                # Refused when the exiting context is not the one that entered: it
+                # never held this request, so there is nothing of ours to restore there.
+                with suppress(ValueError):
+                    _SERVED.reset(bound)
 
 
 def connection_of(connection_scope: Scope) -> HTTPConnection | None:
@@ -236,7 +264,10 @@ def current_connection() -> HTTPConnection:
     Raises:
         FastapiIntegrationError: If no marker of a served request has
             resolved, so there is no connection to read.
+        UnitReadDuringSingletonBuildError: If a singleton is being built
+            here, in a kernel built in debug mode.
     """
+    refuse_during_singleton_build("the connection being served")
     served = _SERVED.get()
     connection = served.connection if served is not None else None
     if connection is None:
@@ -346,7 +377,15 @@ def _publish(request: HTTPConnection) -> None:
 
 
 def _connection_container(request: HTTPConnection) -> KernelContainer:
-    """Return the container attached to the application ``request`` belongs to."""
+    """Return the container of the scope open on ``request``'s connection, or of its application.
+
+    The scope's first: a mounted application the connection is routed into
+    is attached to no kernel, while the scope open on the connection is the
+    kernel's whatever application serves it now.
+    """
+    served = _served_of(request.scope)
+    if served is not None and served.container is not None:
+        return served.container
     app = cast("Starlette", request.app)  # the framework types the connection's app loosely
     attached = attached_kernel(app)
     if attached is None:

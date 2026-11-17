@@ -9,7 +9,6 @@ priority, highest first, then in declaration order.
 from __future__ import annotations
 
 import re
-import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from itertools import count
@@ -27,16 +26,18 @@ from ._registration import (
     clone_function,
     decorating_factory,
     env_resolving_factory,
+    guarded_factory,
     map_result,
     resolving_instance_factory,
     synthesize_class_factory,
 )
 from ._wireup_bridge import key_type
 from .before_after_sorter import sort_with_priorities
-from .resettable_service_pass import RESET_TAG, not_weak_referenceable
+from .resettable_service_pass import RESET_TAG
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from contextlib import AbstractContextManager
 
     from wireup import AsyncContainer
 
@@ -139,6 +140,8 @@ def emit_injectables(
     definitions: Sequence[Definition],
     decorations: Mapping[ServiceKey, Sequence[Decoration]],
     track: Callable[[object, str], None],
+    *,
+    singleton_guard: Callable[[], AbstractContextManager[object]] | None = None,
 ) -> list[object]:
     """Return the wireup injectables realizing ``definitions``, already in emission order.
 
@@ -147,11 +150,17 @@ def emit_injectables(
         decorations: Per key, the decorations to apply, outermost last.
         track: Called with every built instance of a resettable service and
             its reset method.
+        singleton_guard: Entered around building every singleton, when
+            given — so a debug kernel can refuse reads of the unit of work a
+            singleton would keep whichever unit built it.
     """
     boxes = count(1)
     injectables: list[object] = []
     for definition in definitions:
-        injectables.extend(_emit(definition, decorations.get(definition.key, ()), track, boxes))
+        guard = singleton_guard if definition.lifetime == "singleton" else None
+        injectables.extend(
+            _emit(definition, decorations.get(definition.key, ()), track, boxes, guard=guard)
+        )
     return injectables
 
 
@@ -196,20 +205,25 @@ def _emit(
     decorations: Sequence[Decoration],
     track: Callable[[object, str], None],
     boxes: Iterator[int],
+    *,
+    guard: Callable[[], AbstractContextManager[object]] | None,
 ) -> list[object]:
     """Return the injectables realizing ``definition``: one, or a box per decoration plus one."""
     provided, qualifier = definition.key
     lifetime = definition.lifetime
     hook = _reset_hook(definition)
-    if not decorations and hook is None:
+    instance = definition.kind == "instance"
+    if not decorations and hook is None and (instance or guard is None):
         as_is = _as_is(definition)
         if as_is is not None:
             return [as_is]
     factory, implementation = _factory_for(
-        definition.provider, instance=definition.kind == "instance", arguments=definition.arguments
+        definition.provider, instance=instance, arguments=definition.arguments
     )
+    if guard is not None and not instance:
+        factory = guarded_factory(factory, guard, provides=implementation)
     if hook is not None:
-        tracked = _tracking(track, hook, definition)
+        tracked = _tracking(track, hook)
         factory = map_result(factory, tracked, provides=implementation)
     emitted: list[object] = []
     for decoration in decorations:
@@ -222,6 +236,8 @@ def _emit(
         factory = decorating_factory(
             decorator, decoration.inner_parameter, box, provides=implementation
         )
+        if guard is not None:
+            factory = guarded_factory(factory, guard, provides=implementation)
     emitted.append(
         wireup.injectable(
             factory,
@@ -234,11 +250,17 @@ def _emit(
 
 
 def _reset_hook(definition: Definition) -> str | None:
-    """Return the ``method`` attribute of the first ``kernel.reset`` tag, else ``None``.
+    """Return the reset method of a singleton tagged ``kernel.reset``, else ``None``.
 
     The ``kernel.reset`` tag carries the method name the ``ServicesResetter``
     calls on a service; ``ResettableServicePass`` has checked it is a string.
+    Only a singleton is tracked: a scoped or transient instance lives and
+    dies with its unit of work, so it has nothing to reset — and resetting it
+    from whichever unit ends first would clear the state of another still
+    running.
     """
+    if definition.lifetime != "singleton":
+        return None
     tags = definition.get_tag(RESET_TAG)
     return cast("str", tags[0]["method"]) if tags else None
 
@@ -285,20 +307,10 @@ def _factory_for(
     return factory, implementation
 
 
-def _tracking(
-    track: Callable[[object, str], None], method: str, definition: Definition
-) -> Callable[[object], object]:
-    """Return what hands each instance ``definition`` builds to ``track``.
-
-    A factory may build what its return annotation does not tell, so a
-    short-lived instance refusing weak references is refused when it is
-    built — the build can only check a class.
-    """
-    short_lived = definition.lifetime != "singleton"
+def _tracking(track: Callable[[object, str], None], method: str) -> Callable[[object], object]:
+    """Return what hands each instance a factory builds to ``track``."""
 
     def tracked(value: object) -> object:
-        if short_lived and not _accepts_weak_references(value):
-            raise not_weak_referenceable(definition.key, definition.lifetime)
         track(value, method)
         return value
 
@@ -358,11 +370,3 @@ def _engine_readable(token: str) -> str:
     """Turn a ``repr(cls)`` such as ``<class 'a.B'>`` into its dotted path."""
     match = _ENGINE_CLASS.fullmatch(token)
     return match.group("path") if match else token
-
-
-def _accepts_weak_references(value: object) -> bool:
-    try:
-        _ = weakref.ref(value)
-    except TypeError:
-        return False
-    return True

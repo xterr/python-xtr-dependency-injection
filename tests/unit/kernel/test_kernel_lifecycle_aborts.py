@@ -276,3 +276,43 @@ async def test_a_bundles_container_is_set_during_shutdown_and_cleared_after() ->
 
     assert ContainerClearedBundle.seen_during_shutdown is not None
     assert bundle.container is None
+
+
+class _UnreprableError(RuntimeError):
+    @override
+    def __repr__(self) -> str:
+        raise ValueError("cannot say")
+
+
+@as_bundle("res_fails_shutdown_unreprably")
+class UnreprableShutdownBundle(Bundle):
+    """Boots fine, then fails as it shuts down with an error that cannot be repr'd."""
+
+    @override
+    async def shutdown(self) -> None:
+        raise _UnreprableError
+
+
+@required_bundle(UnreprableShutdownBundle)
+@as_bundle("res_fails_boot_before_unreprable")
+class FailingBootBeforeUnreprableBundle(Bundle):
+    @override
+    async def boot(self) -> None:
+        message = "boot failed"
+        raise ValueError(message)
+
+
+async def test_a_boot_failure_keeps_its_error_when_the_rollback_error_cannot_be_repred() -> None:
+    compiled = Kernel(
+        _PACKAGE,
+        env="dev",
+        bundles={FailingBootBeforeUnreprableBundle: {"all": True}},
+        resources=(),
+    ).build()
+
+    with pytest.raises(ValueError, match="boot failed") as caught:
+        _ = await compiled.boot()
+
+    (note,) = caught.value.__notes__
+    assert note.startswith("shutting down after the failed boot also failed")
+    assert "unprintable" in note

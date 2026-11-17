@@ -132,7 +132,7 @@ def create_container(  # noqa: PLR0913 — the pipeline's inputs, plus the calle
     merged = merge_parameters(sources)
     merged[ENV_PARAMETERS_ROOT] = env_tokens()
     container = compile_container(
-        prepared.injectables, prepared.ordered, parameters=merged, concurrent_scoped_access=False
+        prepared.injectables, prepared.ordered, parameters=merged, concurrent_scoped_access=True
     )
     _ = prepared.finish_report()
     return container

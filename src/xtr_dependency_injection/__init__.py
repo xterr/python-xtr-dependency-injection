@@ -28,6 +28,7 @@ from .cache_warmer import (
 from .compiler.before_after_sorter import sort_with_priorities
 from .compiler.compiler_pass_interface import CompilerPassInterface
 from .compiler.pass_stage import PassStage
+from .compiler.unit_participant_pass import UNIT_PARTICIPANT_TAG
 from .config import AliasOf, configure, env, one_or_many, parameters
 from .decorator import (
     Autowire,
@@ -66,6 +67,7 @@ from .runtime import (
     ServicesResetter,
     bind_callable,
     current_unit_of_work,
+    open_unit_of,
     optional_service,
     unit_of_work,
 )
@@ -74,6 +76,7 @@ from .scan import DEFAULT_EXCLUDES
 __all__ = [
     "BUNDLE_PASS_PRIORITY",
     "DEFAULT_EXCLUDES",
+    "UNIT_PARTICIPANT_TAG",
     "AliasOf",
     "Autowire",
     "AutowireDecorated",
@@ -134,6 +137,7 @@ __all__ = [
     "on_boot",
     "on_shutdown",
     "one_or_many",
+    "open_unit_of",
     "optional_service",
     "parameters",
     "qualified_name",

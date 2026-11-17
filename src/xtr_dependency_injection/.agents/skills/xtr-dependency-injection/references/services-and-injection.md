@@ -218,5 +218,5 @@ resetter = await container.get(ServicesResetter)
 await resetter.reset()
 ```
 
-Only services that were actually built are tracked, and weakly — a scoped or transient
-resettable class with `__slots__` must list `"__weakref__"`.
+Only singletons that were actually built are tracked and reset; a scoped or transient service
+ends with its unit and is never reset.

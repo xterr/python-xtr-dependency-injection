@@ -8,7 +8,9 @@ build()     environment → bundles → early scan → build() of every bundle �
             load_extension → late scan → the application's definitions →
             compiler passes by stage → compile
 boot()      bundle.boot() in bundle order → the application's @on_boot hooks
-shutdown()  @on_shutdown hooks → bundle.shutdown() in reverse → container.close()
+shutdown()  @on_shutdown hooks → wait for the open units (up to 30 s) →
+            bundle.shutdown() in reverse → container.close(); every get after it raises
+            KernelShutDownError
 ```
 
 Required bundles boot before their requirer and shut down after it, so a peer's services are
@@ -112,8 +114,8 @@ await resetter.reset()
 Anything inheriting `ResetInterface` (from `xtr-service-contracts`) is autoconfigured into that;
 a bundle opts a service in explicitly with
 `services.set(X).add_tag("kernel.reset", method="clear")`. The `method` is required and must
-exist, or the build fails. Only services that were actually built are tracked, weakly, so a
-`scoped` or `transient` resettable class with `__slots__` must list `"__weakref__"`.
+exist, or the build fails. Only singletons that were actually built are tracked and reset; a
+scoped or transient service ends with its unit and is never reset.
 
 ## Small helpers
 

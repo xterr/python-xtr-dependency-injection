@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, final
 
+from xtr_dependency_injection._text import safe_repr
 from xtr_dependency_injection.exception import KernelAlreadyBootedError
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
@@ -104,7 +105,9 @@ class CompiledKernel:
             try:
                 await partial.shutdown()
             except BaseException as cleanup:  # noqa: BLE001 — noted, never raised in place of the boot failure.
-                error.add_note(f"shutting down after the failed boot also failed: {cleanup!r}")
+                error.add_note(
+                    f"shutting down after the failed boot also failed: {safe_repr(cleanup)}"
+                )
             raise
         return BootedKernel(self._engine, self._info, self._bundles, self._on_shutdown)
 

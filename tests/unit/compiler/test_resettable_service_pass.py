@@ -88,7 +88,7 @@ class WeakSlottedCache:
 
 
 @pytest.mark.parametrize("lifetime", ["scoped", "transient"])
-def test_a_short_lived_class_without_weak_references_is_refused(lifetime: str) -> None:
+def test_a_short_lived_class_without_weak_references_is_valid(lifetime: str) -> None:
     state = _state()
     _ = (
         ServiceConfigurator(state, Origin("app", "tests"))
@@ -97,7 +97,20 @@ def test_a_short_lived_class_without_weak_references_is_refused(lifetime: str) -
         .add_tag(RESET_TAG, method="clear")
     )
 
-    with pytest.raises(InvalidDefinitionError, match="__weakref__"):
+    _process(state)
+
+
+@pytest.mark.parametrize("lifetime", ["scoped", "transient"])
+def test_a_short_lived_class_is_still_checked_for_its_method(lifetime: str) -> None:
+    state = _state()
+    _ = (
+        ServiceConfigurator(state, Origin("app", "tests"))
+        # The wrong type is the case under test.
+        .set(SlottedCache, lifetime=lifetime)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        .add_tag(RESET_TAG, method="flush")
+    )
+
+    with pytest.raises(InvalidDefinitionError, match="'flush'"):
         _process(state)
 
 

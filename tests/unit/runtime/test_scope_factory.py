@@ -11,6 +11,7 @@ import pytest
 import wireup
 
 from xtr_dependency_injection import current_unit_of_work
+from xtr_dependency_injection.compiler._registration import clone_function
 from xtr_dependency_injection.runtime.scope_factory import ScopeFactory
 from xtr_dependency_injection.runtime.scope_factory_interface import ScopeFactoryInterface
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
@@ -35,8 +36,9 @@ async def session_factory() -> AsyncIterator[Session]:
 
 
 def _container() -> WireupContainer:
+    # wireup refuses to register one function twice; each container gets a clone.
     engine = wireup.create_async_container(
-        injectables=[wireup.injectable(session_factory, lifetime="scoped")],
+        injectables=[wireup.injectable(clone_function(session_factory), lifetime="scoped")],
     )
     return WireupContainer(engine)
 

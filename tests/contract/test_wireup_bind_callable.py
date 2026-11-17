@@ -10,6 +10,7 @@ import wireup
 from wireup import Injected
 
 from xtr_dependency_injection import Injected as XtrInjected
+from xtr_dependency_injection.compiler._registration import clone_function, synthesize_class_factory
 from xtr_dependency_injection.runtime import bind_callable
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
@@ -63,10 +64,12 @@ async def greet_forward_ref(name: str, greeting: XtrInjected["Greeting"]) -> str
 
 
 def _container(*extra: object) -> WireupContainer:
+    # wireup refuses to register one class or function twice; each container gets its own
+    # factory, as the compiler gives each kernel.
     engine = wireup.create_async_container(
         injectables=[
             wireup.instance(Greeting(), as_type=Greeting),
-            wireup.injectable(GreetHandler),
+            wireup.injectable(synthesize_class_factory(GreetHandler)),
             *extra,
         ]
     )
@@ -87,7 +90,7 @@ async def test_a_class_target_is_built_lazily_and_its_call_is_filled() -> None:
 
 async def test_a_per_call_scope_is_released_even_when_the_call_raises() -> None:
     OPENED.clear()
-    container = _container(wireup.injectable(session_resource, lifetime="scoped"))
+    container = _container(wireup.injectable(clone_function(session_resource), lifetime="scoped"))
     bound = bind_callable(container, failing, per_call_scope=True)
 
     with pytest.raises(RuntimeError):

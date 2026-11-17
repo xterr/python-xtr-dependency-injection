@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
+import gc
 import types
+import weakref
+from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
 import pytest
@@ -134,6 +138,24 @@ async def test_the_param_resolver_reads_the_attached_container() -> None:
     value = await resolve(request)
 
     assert value == "!"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("kind", "expected"), [("param", "!"), ("env", "hi")])
+async def test_a_connection_resolver_in_a_mounted_sub_app_reads_the_scope_open_on_its_connection(
+    monkeypatch: pytest.MonkeyPatch, kind: Literal["param", "env"], expected: str
+) -> None:
+    monkeypatch.setenv("XTR_FASTAPI_TEST_GREETING", "hi")
+    app = _served_app()
+    scope = _connection(app).scope
+    resolve = provider(kind, "app.punctuation" if kind == "param" else "XTR_FASTAPI_TEST_GREETING")
+
+    async with request_scope(app, scope):
+        # A mount routes the same connection into its own application, attached to no kernel.
+        scope["app"] = Starlette()
+        value = await resolve(HTTPConnection(scope))
+
+    assert value == expected
 
 
 @pytest.mark.anyio
@@ -364,3 +386,52 @@ async def test_a_context_that_outlives_the_scope_reads_nothing_of_it() -> None:
             _ = current_connection()
 
     kept.run(read)
+
+
+@pytest.mark.anyio
+async def test_a_request_scope_exited_in_another_context_still_closes_its_connection() -> None:
+    app = _served_app()
+    connection = _connection(app)
+    resolve = provider("service", Greeter, None)
+    stack = AsyncExitStack()
+    kept: list[contextvars.Context] = []
+
+    async def open_it() -> None:
+        await stack.enter_async_context(request_scope(app, connection.scope))
+        _ = await resolve(connection)
+        kept.append(contextvars.copy_context())
+
+    await asyncio.create_task(open_it())
+    await asyncio.create_task(stack.aclose())
+
+    def read() -> None:
+        assert current_unit_of_work() is None
+        with pytest.raises(FastapiIntegrationError, match="can only be read"):
+            _ = current_connection()
+
+    assert connection_of(connection.scope) is None
+    kept[0].run(read)
+
+
+@pytest.mark.anyio
+async def test_a_request_scope_releases_its_scoped_services_when_it_exits() -> None:
+    app = Starlette()
+    kernel = Kernel(
+        "tests.fixtures.app_env",
+        bundles={MailBundle: {"all": True}},
+        env="test",
+        environ={"MAIL_PORT": "2525"},
+    )
+    attach(app, kernel.build())
+    connection = _connection(app)
+    resolve = provider("service", AsyncSession, None)
+
+    gc.disable()
+    try:
+        async with request_scope(app, connection.scope):
+            kept = weakref.ref(await resolve(connection))
+            assert kept() is not None
+
+        assert kept() is None
+    finally:
+        gc.enable()

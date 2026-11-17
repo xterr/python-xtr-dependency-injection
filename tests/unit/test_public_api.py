@@ -82,10 +82,12 @@ PUBLIC = {
     "one_or_many",
     "unit_of_work",
     "current_unit_of_work",
+    "open_unit_of",
     "__version__",
     "BUNDLE_PASS_PRIORITY",
     "sort_with_priorities",
     "ScopeFactoryInterface",
+    "UNIT_PARTICIPANT_TAG",
 }
 
 # What the web seam exports for an entry point such as the HTTP kernel to

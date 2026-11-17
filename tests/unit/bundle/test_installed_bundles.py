@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib
 from importlib.metadata import EntryPoint
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, final
+
+from typing_extensions import override
 
 from tests.support.bundles import ChorusBundle, EchoBundle
 from xtr_dependency_injection.bundle import (
@@ -113,3 +115,31 @@ def test_an_entry_that_is_not_a_bundle_is_not_reported_as_unusable(
     _advertise(monkeypatch, plugin="tests.support.bundles:Plugin")
 
     assert advertised_bundles().unusable == ()
+
+
+class _UnprintableError(Exception):
+    @override
+    def __str__(self) -> str:
+        raise ValueError("cannot say")
+
+
+@final
+class _UnloadableEntry:
+    name = "unprintable"
+
+    def load(self) -> object:
+        raise _UnprintableError
+
+
+def test_installed_bundles_names_an_unprintable_error_by_its_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def entry_points(*, group: str) -> tuple[_UnloadableEntry, ...]:
+        return (_UnloadableEntry(),) if group == BUNDLES_ENTRY_POINT_GROUP else ()
+
+    monkeypatch.setattr(_MODULE, "entry_points", entry_points)
+
+    ((name, error),) = advertised_bundles().unusable
+
+    assert name == "unprintable"
+    assert "_UnprintableError" in error

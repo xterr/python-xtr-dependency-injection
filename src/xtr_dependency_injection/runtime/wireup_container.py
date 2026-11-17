@@ -13,6 +13,7 @@ from typing_extensions import override
 from wireup.errors import UnknownParameterError
 from xtr_service_contracts import ContainerInterface
 
+from xtr_dependency_injection._text import safe_str
 from xtr_dependency_injection.compiler._wireup_bridge import is_registered, parameters_of
 from xtr_dependency_injection.config.env_placeholder import (
     ENV_PARAMETERS_ROOT,
@@ -21,17 +22,22 @@ from xtr_dependency_injection.config.env_placeholder import (
 )
 from xtr_dependency_injection.exception import (
     EnvPlaceholderError,
+    KernelShutDownError,
     ParameterNotFoundError,
     ServiceNotFoundError,
     ServiceResolutionError,
+    UnitOfWorkClosedError,
 )
 
+from ._unit_scope import is_shut_down
 from .env_var_processors_locator import EnvVarProcessorsLocator
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
     from wireup import AsyncContainer, ScopedAsyncContainer
+
+    from ._unit_scope import Unit
 
 __all__ = ["WireupContainer"]
 
@@ -49,31 +55,48 @@ _SCOPE_ADVICE = (
 class WireupContainer(ContainerInterface):
     """Wraps a wireup ``AsyncContainer`` behind :class:`ContainerInterface`.
 
-    Given a ``scope`` of that container too, it is a unit of work's view: it
-    resolves scoped services — once each, for the scope's lifetime — as well
-    as singletons, and reads the same parameters.
+    Given a unit of work of that container too, it is the unit's view: it
+    resolves scoped services — once each, for the unit's lifetime — as well
+    as singletons, and reads the same parameters. Once the unit has exited
+    it resolves nothing, so a task that outlived the unit cannot reach the
+    services it released.
     """
 
-    __slots__ = ("_container", "_scope")
+    __slots__ = ("_container", "_unit")
 
-    def __init__(
-        self, container: AsyncContainer, scope: ScopedAsyncContainer | None = None
-    ) -> None:
-        """Wrap ``container``, resolving through ``scope`` when one is given."""
+    def __init__(self, container: AsyncContainer, unit: Unit | None = None) -> None:
+        """Wrap ``container``, resolving through ``unit``'s scope when one is given."""
         self._container = container
-        self._scope = scope
+        self._unit = unit
 
     @override
     async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
+        """Return the service registered under ``service`` and ``qualifier``.
+
+        Raises:
+            KernelShutDownError: If the kernel this container belongs to has
+                shut down.
+            UnitOfWorkClosedError: If this is the view of a unit of work that
+                has exited.
+            ServiceNotFoundError: If nothing is registered under the key.
+            ServiceResolutionError: If building the service failed.
+        """
+        resolver: AsyncContainer | ScopedAsyncContainer = self._container
+        if is_shut_down(self._container):
+            raise KernelShutDownError
+        if self._unit is not None:
+            scope = self._unit.scope
+            if scope is None:
+                raise UnitOfWorkClosedError
+            resolver = scope
         if not is_registered(self._container, service, qualifier):
             raise ServiceNotFoundError((service, qualifier))
-        resolver = self._scope if self._scope is not None else self._container
         try:
             return await resolver.get(service, qualifier)
         except ServiceNotFoundError:
             raise
         except Exception as error:
-            reason = str(error)
+            reason = safe_str(error)
             advice = _SCOPE_ADVICE if "scope mismatch" in reason.lower() else None
             raise ServiceResolutionError((service, qualifier), reason, advice=advice) from error
 

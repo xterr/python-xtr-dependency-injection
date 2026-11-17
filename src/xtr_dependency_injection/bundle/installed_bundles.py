@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Final, cast
 
+from xtr_dependency_injection._text import safe_str
+
 from .bundle import METADATA_ATTRIBUTE, AnyBundle, Bundle
 
 if TYPE_CHECKING:
@@ -83,7 +85,7 @@ def advertised_bundles() -> AdvertisedBundles:
         try:
             advertised = load()
         except Exception as error:  # noqa: BLE001 — another distribution's code; one broken entry must not hide the rest.
-            unusable.append((entry.name, f"{type(error).__name__}: {error}"))
+            unusable.append((entry.name, f"{type(error).__name__}: {safe_str(error)}"))
             continue
         if not (isinstance(advertised, type) and issubclass(advertised, Bundle)):
             continue

@@ -10,13 +10,14 @@ for code that never serves an application.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 from xtr_dependency_injection.exception import InvalidArgumentTypeError
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Callable, Hashable, Mapping
 
 __all__ = ["IS_DEPENDENCY", "DependencyBase", "set_dependency"]
 
@@ -49,7 +50,16 @@ else:
     from fastapi.params import Depends as DependencyBase  # pyright: ignore[reportUnreachable]
 
 
-_COPY_ARGUMENTS: Final = frozenset({"dependency", "use_cache", "scope"})
+_FRAMEWORK_FIELDS: Final = (
+    dataclasses.fields(DependencyBase) if dataclasses.is_dataclass(DependencyBase) else ()
+)
+"""The fields the framework's own dependency declaration has, in whatever version is installed.
+
+Read from the framework rather than named here, so a field a release adds —
+a concurrency limit, say — is set like the rest instead of left missing.
+"""
+
+_COPY_ARGUMENTS: Final = frozenset(field.name for field in _FRAMEWORK_FIELDS if field.init)
 """What the framework's route analysis passes when it copies a marker."""
 
 
@@ -111,5 +121,27 @@ def set_dependency(
         else:
             resolved = provider("service", dependency, qualifier)
     object.__setattr__(marker, "dependency", resolved)
-    object.__setattr__(marker, "use_cache", given.get("use_cache", True))
-    object.__setattr__(marker, "scope", given.get("scope"))
+    _set_framework_fields(marker, given)
+
+
+def _set_framework_fields(marker: object, given: Mapping[str, object]) -> None:
+    """Set every framework field but ``dependency``, then run the framework's own checks.
+
+    Each from what the framework's copy passed, or the framework's own default:
+    the marker never runs the framework's ``__init__``, so nothing else would.
+    """
+    for field in _FRAMEWORK_FIELDS:
+        if field.name == "dependency":
+            continue
+        if field.name in given:
+            value = given[field.name]
+        elif field.default is not dataclasses.MISSING:
+            value = cast("object", field.default)
+        else:
+            value = cast("Callable[[], object]", field.default_factory)()
+        object.__setattr__(marker, field.name, value)
+    post_init = cast(
+        "Callable[[object], None] | None", getattr(DependencyBase, "__post_init__", None)
+    )
+    if post_init is not None:
+        post_init(marker)

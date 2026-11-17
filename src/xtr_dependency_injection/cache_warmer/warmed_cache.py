@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import sys
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Final, final
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
 
 __all__ = ["WarmedCache"]
 
 _STAMP: Final = ".warmed"
 _LOCK: Final = ".warmed.lock"
+_RETRY: Final = 0.05
+"""Seconds between two tries for a lock another process holds."""
 
 
 @final
@@ -55,18 +58,27 @@ class WarmedCache:
         _ = temporary.write_text(self._fingerprint, encoding="utf-8")
         _ = temporary.replace(stamp)
 
-    @contextmanager
-    def lock(self) -> Generator[None, None, None]:
+    @asynccontextmanager
+    async def lock(self) -> AsyncGenerator[None, None]:
         """Hold the cache directory, creating it, so one process at a time warms it.
 
         The lock is a file lock: it holds across processes, and is let go
         whatever happens, even when the process dies. Where file locks are not
         available it holds nothing.
+
+        Waiting never blocks the event loop: the lock is tried without blocking,
+        and between tries the task sleeps, so the wait can be cancelled.
         """
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         with (self._cache_dir / _LOCK).open("a") as handle:
             if sys.platform != "win32":
                 import fcntl  # noqa: PLC0415 — only where the platform has it.
 
-                fcntl.flock(handle, fcntl.LOCK_EX)
+                while True:
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        await asyncio.sleep(_RETRY)
+                    else:
+                        break
             yield

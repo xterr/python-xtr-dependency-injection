@@ -12,6 +12,11 @@ dispatched while another is handled — shares its instances. Only new work —
 a message a worker received — asks for one of its own inside. A unit of another
 container — a second kernel in the process — is never joined: that container
 opens one of its own, inside.
+
+A container handed out for a unit — by :func:`unit_of_work`, by
+:func:`current_unit_of_work`, by :func:`open_unit_of` — belongs to it: once
+the unit exits it resolves nothing, so work that outlived the unit cannot
+reach the services it released.
 """
 
 from __future__ import annotations
@@ -21,16 +26,26 @@ from typing import TYPE_CHECKING
 
 from xtr_dependency_injection.exception import InvalidArgumentTypeError
 
-from ._unit_scope import current_unit, entered, open_unit
+from ._scope_exit import closing_scope
+from ._unit_scope import (
+    counted,
+    current_unit_record,
+    entered,
+    open_unit,
+    participants_of,
+    participating,
+    refuse_during_singleton_build,
+)
 from .wireup_container import WireupContainer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from contextlib import AbstractAsyncContextManager
 
+    from wireup import AsyncContainer
     from xtr_service_contracts import ContainerInterface
 
-__all__ = ["current_unit_of_work", "unit_of_work"]
+__all__ = ["current_unit_of_work", "open_unit_of", "unit_of_work"]
 
 
 def unit_of_work(
@@ -65,20 +80,48 @@ def unit_of_work(
 async def _unit_of_work(
     container: ContainerInterface, *, join: bool
 ) -> AsyncGenerator[ContainerInterface]:
-    if not isinstance(container, WireupContainer):
-        msg = "a unit of work needs a kernel-provided container"
-        raise InvalidArgumentTypeError(msg)
-    engine = container._engine()  # noqa: SLF001 — the unit owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
+    engine = _engine_of(container)
     opened = open_unit(engine) if join else None
     if opened is not None:
         yield WireupContainer(engine, opened)
         return
-    async with engine.enter_scope() as scope:
-        with entered(engine, scope):
-            yield WireupContainer(engine, scope)
+    participants = await participants_of(engine)
+    with counted(engine), participating(participants):
+        async with closing_scope(engine) as scope:
+            with entered(engine, scope) as unit:
+                yield WireupContainer(engine, unit)
 
 
 def current_unit_of_work() -> ContainerInterface | None:
-    """Return the unit of work open in this context, or ``None`` outside one."""
-    opened = current_unit()
-    return None if opened is None else WireupContainer(*opened)
+    """Return the unit of work open in this context, or ``None`` outside one.
+
+    Raises:
+        UnitReadDuringSingletonBuildError: If a singleton is being built here,
+            in a kernel built in debug mode: it would keep whichever unit
+            happened to build it.
+    """
+    refuse_during_singleton_build("the unit of work open in this context")
+    unit = current_unit_record()
+    return None if unit is None else WireupContainer(unit.engine, unit)
+
+
+def open_unit_of(container: ContainerInterface) -> ContainerInterface | None:
+    """Return the unit of work open in this context on ``container``'s services, if any.
+
+    For a service that must work in the unit of whatever is being handled
+    when there is one, and from ``container`` itself otherwise. A unit of
+    another container — a second kernel's — is not ``container``'s.
+
+    Raises:
+        InvalidArgumentTypeError: If ``container`` is not one a kernel built.
+    """
+    engine = _engine_of(container)
+    unit = open_unit(engine)
+    return None if unit is None else WireupContainer(engine, unit)
+
+
+def _engine_of(container: ContainerInterface) -> AsyncContainer:
+    if not isinstance(container, WireupContainer):
+        msg = "a unit of work needs a kernel-provided container"
+        raise InvalidArgumentTypeError(msg)
+    return container._engine()  # noqa: SLF001 — the unit owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]

@@ -28,6 +28,7 @@ from ._wireup_bridge import REGISTRATION_ATTRIBUTE, parameter_injections, to_eng
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
+    from contextlib import AbstractContextManager
 
     from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
@@ -37,6 +38,7 @@ __all__ = [
     "clone_function",
     "decorating_factory",
     "env_resolving_factory",
+    "guarded_factory",
     "map_result",
     "null_decorator_factory",
     "resolving_instance_factory",
@@ -158,6 +160,103 @@ def map_result(
         provides: The type the new factory is registered under.
     """
     return _wrap(factory, evaluated_signature(factory), provides, _unchanged, fn)
+
+
+def guarded_factory(
+    factory: Callable[..., object],
+    guard: Callable[[], AbstractContextManager[object]],
+    /,
+    *,
+    provides: object,
+) -> Callable[..., object]:
+    """Return a factory of ``factory``'s kind building each value inside ``guard()``.
+
+    Only the building is guarded: a generator factory's teardown, the code
+    after its ``yield``, runs outside, as it does when the scope closes.
+    """
+    wrapper: Callable[..., object]
+    annotation: object = provides
+    if inspect.isasyncgenfunction(factory):
+        annotation = cast("Any", AsyncIterator)[provides]
+        wrapper = _guarded_async_generator(factory, guard)
+    elif inspect.isgeneratorfunction(factory):
+        annotation = cast("Any", Iterator)[provides]
+        wrapper = _guarded_generator(factory, guard)
+    elif inspect.iscoroutinefunction(factory):
+        wrapper = _guarded_coroutine(factory, guard)
+    else:
+        wrapper = _guarded_plain(factory, guard)
+    _set(
+        wrapper,
+        __signature__=to_engine_signature(evaluated_signature(factory)).replace(
+            return_annotation=annotation
+        ),
+        __annotations__={"return": annotation},
+        __module__=factory.__module__,
+        __qualname__=getattr(factory, "__qualname__", repr(factory)),
+        __name__=getattr(factory, "__name__", repr(factory)),
+    )
+    return wrapper
+
+
+def _guarded_plain(
+    factory: Callable[..., object], guard: Callable[[], AbstractContextManager[object]]
+) -> Callable[..., object]:
+    def plain(**kwargs: object) -> object:
+        with guard():
+            return factory(**kwargs)
+
+    return plain
+
+
+def _guarded_coroutine(
+    factory: Callable[..., Any], guard: Callable[[], AbstractContextManager[object]]
+) -> Callable[..., object]:
+    async def coroutine(**kwargs: object) -> object:
+        with guard():
+            return cast("object", await factory(**kwargs))
+
+    return coroutine
+
+
+def _guarded_generator(
+    factory: Callable[..., Any], guard: Callable[[], AbstractContextManager[object]]
+) -> Callable[..., object]:
+    def generator(**kwargs: object) -> Generator[object, None, None]:
+        inner = cast("Generator[object, None, None]", factory(**kwargs))
+        with guard():
+            value = next(inner)
+        try:
+            yield value
+        except GeneratorExit:
+            inner.close()
+            raise
+        except BaseException as error:  # noqa: BLE001 — forwarded, not swallowed.
+            _throw(inner, error)
+        else:
+            _ = next(inner, None)
+
+    return generator
+
+
+def _guarded_async_generator(
+    factory: Callable[..., Any], guard: Callable[[], AbstractContextManager[object]]
+) -> Callable[..., object]:
+    async def async_generator(**kwargs: object) -> AsyncGenerator[object, None]:
+        inner = cast("AsyncGenerator[object, None]", factory(**kwargs))
+        with guard():
+            value = await inner.__anext__()
+        try:
+            yield value
+        except GeneratorExit:
+            await inner.aclose()
+            raise
+        except BaseException as error:  # noqa: BLE001 — forwarded, not swallowed.
+            await _athrow(inner, error)
+        else:
+            _ = await anext(inner, None)
+
+    return async_generator
 
 
 def box_type(index: int) -> type:

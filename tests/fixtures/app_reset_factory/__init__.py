@@ -1,4 +1,7 @@
-"""Fixture app: a transient resettable service a factory builds without weak references."""
+"""Fixture app: a transient resettable service a factory builds without weak references.
+
+Only singletons are reset, so the resetter never holds one of these.
+"""
 
 from __future__ import annotations
 

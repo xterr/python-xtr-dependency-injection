@@ -6,6 +6,8 @@ import pytest
 import wireup
 from wireup import Injected
 
+from xtr_dependency_injection.compiler._registration import synthesize_class_factory
+
 pytestmark = pytest.mark.anyio
 
 
@@ -22,7 +24,9 @@ async def send(mailer: Injected[Mailer]) -> str:
 
 
 async def test_an_override_replaces_an_unbuilt_singleton() -> None:
-    container = wireup.create_async_container(injectables=[wireup.injectable(Mailer)])
+    container = wireup.create_async_container(
+        injectables=[wireup.injectable(synthesize_class_factory(Mailer))]
+    )
     fake = FakeMailer()
 
     container.override.set(Mailer, fake)
@@ -32,7 +36,11 @@ async def test_an_override_replaces_an_unbuilt_singleton() -> None:
 
 async def test_an_override_is_seen_by_an_injected_function() -> None:
     container = wireup.create_async_container(
-        injectables=[wireup.injectable(Mailer, qualifier="smtp"), wireup.injectable(Mailer)]
+        # One factory per registration: wireup refuses to register one class twice.
+        injectables=[
+            wireup.injectable(synthesize_class_factory(Mailer), qualifier="smtp"),
+            wireup.injectable(synthesize_class_factory(Mailer)),
+        ]
     )
     injected = wireup.inject_from_container(container)(send)
 
@@ -43,7 +51,7 @@ async def test_an_override_is_seen_by_an_injected_function() -> None:
 
 async def test_a_qualified_override_is_set_by_its_qualifier() -> None:
     container = wireup.create_async_container(
-        injectables=[wireup.injectable(Mailer, qualifier="smtp")]
+        injectables=[wireup.injectable(synthesize_class_factory(Mailer), qualifier="smtp")]
     )
     fake = FakeMailer()
 

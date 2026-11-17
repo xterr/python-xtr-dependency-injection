@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import gc
 import weakref
 
 import pytest
 
+from tests.fixtures.app_resettable_units import Resets, TokenStorage
+from xtr_dependency_injection import unit_of_work
+from xtr_dependency_injection.integration.wireup import create_container
 from xtr_dependency_injection.runtime.services_resetter import ServicesResetter
+from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 pytestmark = pytest.mark.anyio
 
@@ -152,3 +157,57 @@ async def test_every_service_is_reset_when_one_fails_and_the_failures_are_raised
 
     assert reset == ["failing", "fine"]
     assert [type(error) for error in caught.value.exceptions] == [RuntimeError]
+
+
+def _units_container() -> WireupContainer:
+    return WireupContainer(create_container([], scan=["tests.fixtures.app_resettable_units"]))
+
+
+async def test_a_reset_from_one_unit_leaves_another_units_scoped_state_alone() -> None:
+    container = _units_container()
+    resetter = await container.get(ServicesResetter)
+    ready = {"alice": asyncio.Event(), "bob": asyncio.Event()}
+    go = {"alice": asyncio.Event(), "bob": asyncio.Event()}
+
+    async def message(name: str) -> tuple[str, str | None]:
+        async with unit_of_work(container, join=False) as unit:
+            storage = await unit.get(TokenStorage)
+            storage.user = name
+            ready[name].set()
+            _ = await go[name].wait()
+            seen = storage.user
+            await resetter.reset()
+        return name, seen
+
+    alice = asyncio.create_task(message("alice"))
+    bob = asyncio.create_task(message("bob"))
+    _ = await ready["alice"].wait()
+    _ = await ready["bob"].wait()
+    go["alice"].set()
+    first = await alice
+    go["bob"].set()
+    second = await bob
+
+    assert [first, second] == [("alice", "alice"), ("bob", "bob")]
+
+
+async def test_a_scoped_resettable_is_not_tracked() -> None:
+    container = _units_container()
+    resetter = await container.get(ServicesResetter)
+
+    async with unit_of_work(container) as unit:
+        storage = await unit.get(TokenStorage)
+        storage.user = "alice"
+        await resetter.reset()
+
+        assert storage.user == "alice"
+
+
+async def test_a_singleton_resettable_is_still_reset() -> None:
+    container = _units_container()
+    resetter = await container.get(ServicesResetter)
+    resets = await container.get(Resets)
+
+    await resetter.reset()
+
+    assert resets.count == 1

@@ -178,3 +178,30 @@ async def test_resolving_a_scoped_service_from_the_root_advises_how_to_scope() -
     assert isinstance(caught.value.__cause__, WireupError)
     assert "per_call_scope=True" in str(caught.value)
     assert "scoped and transient" in str(caught.value)
+
+
+class UnprintableError(Exception):
+    @override
+    def __str__(self) -> str:
+        raise ValueError("cannot say")
+
+
+class BuiltFromUnprintableFactory:
+    pass
+
+
+def unprintable_factory() -> BuiltFromUnprintableFactory:
+    raise UnprintableError
+
+
+async def test_get_names_an_unprintable_error_by_its_class() -> None:
+    engine = wireup.create_async_container(
+        injectables=[wireup.injectable(unprintable_factory)],
+    )
+    container = WireupContainer(engine)
+
+    with pytest.raises(ServiceResolutionError) as caught:
+        _ = await container.get(BuiltFromUnprintableFactory)
+
+    assert "UnprintableError" in caught.value.reason
+    assert isinstance(caught.value.__cause__, UnprintableError)

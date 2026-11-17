@@ -10,6 +10,7 @@ container, once, on first use, and its ``__call__`` is what gets filled.
 from __future__ import annotations
 
 import inspect
+from contextlib import suppress
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, cast
 
@@ -20,42 +21,58 @@ from xtr_dependency_injection.compiler._wireup_bridge import (
     parameter_injections,
     to_engine_signature,
 )
-from xtr_dependency_injection.exception import InvalidArgumentTypeError
+from xtr_dependency_injection.exception import InvalidArgumentTypeError, UnitOfWorkClosedError
 from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.exception._signatures import evaluated_signature
-from xtr_dependency_injection.runtime._unit_scope import entered, open_unit
+from xtr_dependency_injection.runtime._scope_exit import closing_scope
+from xtr_dependency_injection.runtime._unit_scope import (
+    counted,
+    entered,
+    open_unit,
+    participants_of,
+    participating,
+)
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+    from contextvars import Token
 
-    from wireup import AsyncContainer, ScopedAsyncContainer
+    from wireup import ScopedAsyncContainer
     from xtr_service_contracts import ContainerInterface
+
+    from xtr_dependency_injection.runtime._unit_scope import Unit
 
 __all__ = ["bind_callable"]
 
-# The scope of the bound call running in this context. One variable serves
-# every binding: calls nest, and each call restores what it replaced.
-_scope: ContextVar[ScopedAsyncContainer] = ContextVar("xtr_dependency_injection_scope")
+# The unit of work the bound call running in this context resolves from: its
+# own, or the one it joined. One variable serves every binding: calls nest,
+# and each call restores what it replaced.
+_bound_unit: ContextVar[Unit] = ContextVar("xtr_dependency_injection_bound_unit")
 
 
-def _unit_scope_of(engine: AsyncContainer) -> Callable[[], ScopedAsyncContainer]:
-    """Return what gives the scope of ``engine``'s open unit of work; asked only while one is."""
+def _bound_scope() -> ScopedAsyncContainer:
+    """Return the scope of the unit the running bound call resolves its injections from.
 
-    def unit_scope() -> ScopedAsyncContainer:
-        scope = open_unit(engine)
-        if scope is None:  # pragma: no cover — the joined injection runs only inside a unit.
-            msg = "no unit of work is open"
-            raise RuntimeError(msg)
-        return scope
-
-    return unit_scope
+    Asked by the engine as the call starts, right after the unit was found open.
+    """
+    scope = _bound_unit.get().scope
+    if scope is None:  # pragma: no cover — asked only when a call starts, inside an open unit.
+        raise UnitOfWorkClosedError
+    return scope
 
 
-def _unit_scope_or(engine: AsyncContainer) -> AsyncContainer | ScopedAsyncContainer:
-    """Return the scope of ``engine``'s open unit of work, or ``engine`` outside one."""
-    scope = open_unit(engine)
-    return engine if scope is None else scope
+async def _built_in_bound_unit(target: type) -> Callable[..., object]:
+    """Build ``target`` in the unit the running bound call resolves from.
+
+    Raises:
+        UnitOfWorkClosedError: If that unit exited while an injection was
+            being built: the class is not built for it then.
+    """
+    scope = _bound_unit.get().scope
+    if scope is None:
+        raise UnitOfWorkClosedError
+    return cast("Callable[..., object]", await scope.get(target))
 
 
 def bind_callable(
@@ -80,12 +97,10 @@ def bind_callable(
             first call.
         per_call_scope: Enter a scope for every call, releasing what was
             scoped to it when the call ends — even if it raised. That scope
-            is the unit of work of what the call starts. Without it,
-            a call made inside a unit of work (see
+            is the unit of work of what the call starts. Without it, a call
+            made inside a unit of work (see
             :func:`~xtr_dependency_injection.unit_of_work`) joins that unit;
-            outside one, wireup enters a scope only when an ``Injected[...]``
-            parameter needs it, and the class itself is resolved from the
-            root container.
+            outside one, the call is a unit of work of its own.
         signature: The signature to present to wireup instead of
             ``target``'s own (the ``__call__``'s, without ``self``, for a
             class), with its annotations already evaluated.
@@ -110,52 +125,52 @@ def bind_callable(
     )
     presented = to_engine_signature(declared)
     resolved_names = parameter_injections(declared)
-    is_class = isinstance(target, type)
 
     async def entry(*args: object, **kwargs: object) -> object:
         for name in resolved_names:
             if name in kwargs:
                 kwargs[name] = await container.resolve_env_placeholders(kwargs[name])
-        call: Callable[..., object]
-        if is_class:
-            source = _scope.get() if per_call_scope else _unit_scope_or(engine)
-            call = cast("Callable[..., object]", await source.get(target))
-        else:
-            call = target
+        call = await _built_in_bound_unit(target) if isinstance(target, type) else target
         result = call(*args, **kwargs)
         return await cast("Awaitable[object]", result) if inspect.isawaitable(result) else result
 
     _name_like(entry, target)
     setattr(entry, "__signature__", presented)  # noqa: B010 — read by wireup through inspect.signature.
 
-    bound: Callable[..., Awaitable[object]]
-    if per_call_scope:
-        injected = wireup.inject_from_container(engine, scoped_container_supplier=_scope.get)(entry)
+    injected = wireup.inject_from_container(engine, scoped_container_supplier=_bound_scope)(entry)
 
-        async def scoped(*args: object, **kwargs: object) -> object:
-            async with engine.enter_scope() as scope:
-                token = _scope.set(scope)
-                try:
-                    with entered(engine, scope):
-                        return await injected(*args, **kwargs)
-                finally:
-                    _scope.reset(token)
+    async def in_unit(unit: Unit, /, *args: object, **kwargs: object) -> object:
+        token = _bound_unit.set(unit)
+        try:
+            return await injected(*args, **kwargs)
+        finally:
+            _restore(token)
 
-        bound = scoped
-    else:
-        alone = wireup.inject_from_container(engine)(entry)
-        joined = wireup.inject_from_container(
-            engine, scoped_container_supplier=_unit_scope_of(engine)
-        )(entry)
+    async def scoped(*args: object, **kwargs: object) -> object:
+        participants = await participants_of(engine)
+        with counted(engine), participating(participants):
+            async with closing_scope(engine) as scope:
+                with entered(engine, scope) as unit:
+                    return await in_unit(unit, *args, **kwargs)
 
-        async def joining(*args: object, **kwargs: object) -> object:
-            call = joined if open_unit(engine) is not None else alone
-            return await call(*args, **kwargs)
+    async def joining(*args: object, **kwargs: object) -> object:
+        unit = open_unit(engine)
+        if unit is None:
+            return await scoped(*args, **kwargs)
+        return await in_unit(unit, *args, **kwargs)
 
-        bound = joining
+    bound: Callable[..., Awaitable[object]] = scoped if per_call_scope else joining
 
     _name_like(bound, target)
     return bound
+
+
+def _restore(token: Token[Unit]) -> None:
+    """Put back the unit a bound call replaced, in the context it started in."""
+    # Refused when the call finishes in another context than it started in:
+    # that one never held this unit, so there is nothing of ours to restore.
+    with suppress(ValueError):
+        _bound_unit.reset(token)
 
 
 def _signature_of(target: Callable[..., object] | type) -> inspect.Signature:

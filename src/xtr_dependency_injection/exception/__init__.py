@@ -18,6 +18,7 @@ from .conflicting_config_providers_error import ConflictingConfigProvidersError
 from .container_compilation_error import ContainerCompilationError
 from .decorator_signature_error import DecoratorSignatureError
 from .dependency_injection_error import DependencyInjectionError
+from .detached_variable_conflict_error import DetachedVariableConflictError
 from .duplicate_bundle_error import DuplicateBundleError
 from .duplicate_service_error import DuplicateServiceError
 from .env_placeholder_error import EnvPlaceholderError
@@ -29,16 +30,20 @@ from .invalid_environment_error import InvalidEnvironmentError
 from .invalid_environment_variable_error import InvalidEnvironmentVariableError
 from .invalid_parameter_type_error import InvalidParameterTypeError
 from .kernel_already_booted_error import KernelAlreadyBootedError
+from .kernel_shut_down_error import KernelShutDownError
 from .missing_bundle_error import MissingBundleError
 from .missing_environment_variable_error import MissingEnvironmentVariableError
 from .parameter_circular_reference_error import ParameterCircularReferenceError
 from .parameter_conflict_error import ParameterConflictError
 from .parameter_not_found_error import ParameterNotFoundError
 from .resource_import_error import ResourceImportError
+from .scope_teardown_timeout_error import ScopeTeardownTimeoutError
 from .service_circular_reference_error import ServiceCircularReferenceError
 from .service_not_found_error import ServiceNotFoundError
 from .service_order_error import ServiceOrderError
 from .service_resolution_error import ServiceResolutionError
+from .unit_of_work_closed_error import UnitOfWorkClosedError
+from .unit_read_during_singleton_build_error import UnitReadDuringSingletonBuildError
 from .unknown_config_type_error import UnknownConfigTypeError
 from .unknown_environment_folder_error import UnknownEnvironmentFolderError
 from .unknown_locator_key_error import UnknownLocatorKeyError
@@ -55,6 +60,7 @@ __all__ = [
     "ContainerCompilationError",
     "DecoratorSignatureError",
     "DependencyInjectionError",
+    "DetachedVariableConflictError",
     "DuplicateBundleError",
     "DuplicateServiceError",
     "EnvPlaceholderError",
@@ -66,16 +72,20 @@ __all__ = [
     "InvalidEnvironmentVariableError",
     "InvalidParameterTypeError",
     "KernelAlreadyBootedError",
+    "KernelShutDownError",
     "MissingBundleError",
     "MissingEnvironmentVariableError",
     "ParameterCircularReferenceError",
     "ParameterConflictError",
     "ParameterNotFoundError",
     "ResourceImportError",
+    "ScopeTeardownTimeoutError",
     "ServiceCircularReferenceError",
     "ServiceNotFoundError",
     "ServiceOrderError",
     "ServiceResolutionError",
+    "UnitOfWorkClosedError",
+    "UnitReadDuringSingletonBuildError",
     "UnknownConfigTypeError",
     "UnknownEnvironmentFolderError",
     "UnknownLocatorKeyError",

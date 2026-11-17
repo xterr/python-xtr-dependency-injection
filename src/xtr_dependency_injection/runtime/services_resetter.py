@@ -1,9 +1,16 @@
-"""Resetting stateful services between units of work — the ``kernel.reset`` tag.
+"""Resetting singletons between units of work — the ``kernel.reset`` tag.
 
 A long-running worker handles one message after another with the same
-singletons. A service that buffers or caches per unit of work declares a
+singletons. A singleton that caches what it can work out again declares a
 reset method; the worker calls :meth:`ServicesResetter.reset` after each
-message, and only services that were actually built are reset.
+message, and only singletons that were actually built are reset. A scoped or
+transient service is never reset: it lives and dies with its unit of work.
+
+A worker may handle several messages at once, so a reset runs while other
+units are still under way. A singleton's reset must be safe then: it clears
+only what can be worked out again, never state a running unit reads. What
+belongs to one unit of work is kept by that unit — in a scoped service — not
+by a singleton waiting to be reset.
 """
 
 from __future__ import annotations
@@ -20,7 +27,7 @@ __all__ = ["ServicesResetter"]
 
 @final
 class ServicesResetter:
-    """Tracks built resettable services and resets them on demand."""
+    """Tracks built resettable singletons and resets them on demand."""
 
     __slots__ = ("_tracked",)
 
@@ -31,10 +38,10 @@ class ServicesResetter:
     def track(self, instance: object, method: str) -> None:
         """Remember ``instance``, to call its ``method`` on every :meth:`reset`.
 
-        Held weakly when it can be: a scoped or transient service is built
-        again and again, and must not be kept alive by being resettable. When
-        a weakly held instance is collected the entry is dropped immediately,
-        so a long-running worker never accumulates dead references.
+        Held weakly when it can be, so being resettable keeps nothing alive:
+        when a weakly held instance is collected the entry is dropped
+        immediately, so a long-running worker never accumulates dead
+        references.
 
         An instance that cannot be weak-referenced — one whose ``__slots__``
         omit ``__weakref__`` — is instead held strongly, by a closure over it,
@@ -60,7 +67,9 @@ class ServicesResetter:
         """Call each tracked service's reset method, in tracking order; sync or async.
 
         Every service is reset, whichever of them fail: one left holding the
-        last unit of work's state would bleed it into the next.
+        last unit of work's caches would bleed them into the next. Units of
+        work still running are not waited for: each reset must be safe while
+        they run.
 
         Raises:
             ExceptionGroup: Of what every failing reset raised, once all ran.

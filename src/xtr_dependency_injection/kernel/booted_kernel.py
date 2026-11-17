@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, cast, final
+import logging
+from typing import TYPE_CHECKING, Final, cast, final
 
 import wireup
 
@@ -12,6 +13,7 @@ from xtr_dependency_injection.compiler._wireup_bridge import (
     parameter_injections,
     to_engine_signature,
 )
+from xtr_dependency_injection.runtime._unit_scope import mark_shut_down, units_drained
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
 if TYPE_CHECKING:
@@ -26,6 +28,11 @@ if TYPE_CHECKING:
     from .kernel_interface import KernelInterface
 
 __all__ = ["BootedKernel"]
+
+_SHUTDOWN_DRAIN_TIMEOUT: float = 30.0
+"""How many seconds a shutting-down kernel waits for its open units of work to close."""
+
+_LOGGER: Final = logging.getLogger("xtr_dependency_injection")
 
 
 @final
@@ -61,6 +68,14 @@ class BootedKernel:
     async def shutdown(self) -> None:
         """Run the application's ``@on_shutdown`` hooks, then every bundle's, then close.
 
+        Once the hooks ran — they are what stops a worker or a scheduler the
+        application started, and with it whatever keeps opening units — every
+        unit of work still open, a request in flight, a message being handled,
+        is waited for, up to thirty seconds: its scoped services use what the
+        bundles and the container are about to close. Past that the kernel
+        closes anyway, logging how many were left open. Once shut down, its
+        container refuses to resolve.
+
         Bundles shut down in reverse order, and the container is closed last —
         running every generator factory's cleanup. No step stops the others:
         once every one ran, the first ``BaseException`` (a cancellation, an
@@ -77,16 +92,27 @@ class BootedKernel:
         failures: list[BaseException] = []
         for hook in self._on_shutdown:
             await _attempt(failures, lambda hook=hook: call_injected(self._engine, hook))
+        await _attempt(failures, self._drain)
         for bundle in reversed(self._bundles):
             await _attempt(failures, lambda bundle=bundle: bundle.shutdown())
             bundle.container = None
         await _attempt(failures, self._engine.close)
+        mark_shut_down(self._engine)
         errors = [failure for failure in failures if isinstance(failure, Exception)]
         if len(errors) < len(failures):
             raise next(failure for failure in failures if not isinstance(failure, Exception))
         if errors:
             msg = "the kernel failed to shut down cleanly"
             raise ExceptionGroup(msg, errors)
+
+    async def _drain(self) -> None:
+        """Wait for the open units of work, warning when some are still open once given up on."""
+        left_open = await units_drained(self._engine, _SHUTDOWN_DRAIN_TIMEOUT)
+        if left_open:
+            _LOGGER.warning(
+                "shutting the kernel down with units of work still open",
+                extra={"open_units": left_open, "timeout": _SHUTDOWN_DRAIN_TIMEOUT},
+            )
 
     async def __aenter__(self) -> BootedKernel:
         """Return this kernel."""

@@ -16,7 +16,8 @@ from .scope_factory import ScopeFactory
 from .scope_factory_interface import ScopeFactoryInterface
 from .service_locator import ServiceLocator
 from .services_resetter import ServicesResetter
-from .unit_of_work import current_unit_of_work, unit_of_work
+from .shielded import shielded
+from .unit_of_work import current_unit_of_work, open_unit_of, unit_of_work
 
 __all__ = [
     "EnvVarLoaderInterface",
@@ -29,6 +30,8 @@ __all__ = [
     "ServicesResetter",
     "bind_callable",
     "current_unit_of_work",
+    "open_unit_of",
     "optional_service",
+    "shielded",
     "unit_of_work",
 ]
