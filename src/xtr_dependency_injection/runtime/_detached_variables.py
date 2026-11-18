@@ -13,7 +13,7 @@ back.
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from xtr_dependency_injection.exception import DetachedVariableConflictError
 
@@ -23,13 +23,12 @@ if TYPE_CHECKING:
 
 __all__ = ["detach_variables", "register_detached_variable"]
 
-T = TypeVar("T")
 
 # Each registered variable, the value it starts from, and what sets it back to that value.
 _DETACHED: dict[object, tuple[object, Callable[[], object]]] = {}
 
 
-def register_detached_variable(var: ContextVar[T], value: T) -> None:
+def register_detached_variable[T](var: ContextVar[T], value: T) -> None:
     """Have every new connection start with ``var`` set to ``value``.
 
     A bundle registers the variables its library keeps per-request state in

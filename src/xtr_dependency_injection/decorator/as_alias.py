@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from typing import Final, TypeVar, cast
+from typing import Final, cast
 
 from ._marker import own_marker, set_marker
 
 __all__ = ["AliasMarker", "aliases_of", "as_alias"]
 
-T = TypeVar("T", bound=type)
 
 _ALIASES: Final = "__xtr_aliases__"
 
@@ -29,7 +28,7 @@ class AliasMarker:
     qualifier: Hashable | None = None
 
 
-def as_alias(alias: type, *, qualifier: Hashable | None = None) -> Callable[[T], T]:
+def as_alias[T: type](alias: type, *, qualifier: Hashable | None = None) -> Callable[[T], T]:
     """Register the decorated class under ``(alias, qualifier)`` in addition to its own key.
 
     Repeatable: every call appends one alias. The decorated class is also

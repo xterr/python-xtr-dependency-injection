@@ -59,7 +59,7 @@ class WarmedCache:
         _ = temporary.replace(stamp)
 
     @asynccontextmanager
-    async def lock(self) -> AsyncGenerator[None, None]:
+    async def lock(self) -> AsyncGenerator[None]:
         """Hold the cache directory, creating it, so one process at a time warms it.
 
         The lock is a file lock: it holds across processes, and is let go

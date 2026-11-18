@@ -7,9 +7,8 @@ It is the only place a wireup container is wrapped for the public
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar, cast, final
+from typing import TYPE_CHECKING, cast, final, override
 
-from typing_extensions import override
 from wireup.errors import UnknownParameterError
 from xtr_service_contracts import ContainerInterface
 
@@ -41,7 +40,6 @@ if TYPE_CHECKING:
 
 __all__ = ["WireupContainer"]
 
-T = TypeVar("T")
 
 _SCOPE_ADVICE = (
     "scoped and transient services are built inside a scope; resolve them from an "
@@ -70,7 +68,7 @@ class WireupContainer(ContainerInterface):
         self._unit = unit
 
     @override
-    async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
+    async def get[T](self, service: type[T], /, qualifier: Hashable | None = None) -> T:
         """Return the service registered under ``service`` and ``qualifier``.
 
         Raises:
@@ -157,7 +155,7 @@ class WireupContainer(ContainerInterface):
         processors = await self.get(EnvVarProcessorsLocator)
         return processors.get_env(name)
 
-    async def resolve_env_placeholders(self, value: T, /) -> T:
+    async def resolve_env_placeholders[T](self, value: T, /) -> T:
         """Return ``value`` with every environment placeholder it holds resolved.
 
         Only what holds a placeholder is rebuilt; a value without one is

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Annotated, cast, get_args, get_origin, get_type_hints
 
 from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+from xtr_dependency_injection.exception._type_aliases import without_type_aliases
 
 __all__ = ["AliasOf", "alias_of_fields"]
 
@@ -49,9 +50,10 @@ def alias_of_fields(config_type: type) -> list[tuple[str, str]]:
     hints = cast("dict[str, object]", raw_hints)
     found: list[tuple[str, str]] = []
     for name, annotation in hints.items():
-        if get_origin(annotation) is not Annotated:
+        expanded = without_type_aliases(annotation)
+        if get_origin(expanded) is not Annotated:
             continue
-        parts = cast("tuple[object, ...]", get_args(annotation))
+        parts = cast("tuple[object, ...]", get_args(expanded))
         for entry in parts[1:]:
             if isinstance(entry, AliasOf):
                 found.append((name, entry.bundle))

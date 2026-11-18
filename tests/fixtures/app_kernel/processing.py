@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
-
-from typing_extensions import override
+from typing import Annotated, override
 
 from tests.support.bundles import Echo
 from xtr_dependency_injection.builder import Definition, Origin

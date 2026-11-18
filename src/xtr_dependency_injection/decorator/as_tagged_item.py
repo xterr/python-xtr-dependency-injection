@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Final, cast, overload
 
 from ._marker import own_marker, set_marker
 from .as_service import ServiceMarker
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 __all__ = ["TaggedItemMarker", "as_tagged_item", "tagged_item_of"]
 
-T = TypeVar("T")
 
 _TAGGED_ITEM: Final = "__xtr_tagged_item__"
 _SERVICE: Final = "__xtr_service__"
@@ -39,16 +38,16 @@ class TaggedItemMarker:
 
 
 @overload
-def as_tagged_item(target: T, /) -> T: ...
+def as_tagged_item[T](target: T, /) -> T: ...
 @overload
-def as_tagged_item(
+def as_tagged_item[T](
     *,
     index: Hashable | None = None,
     priority: int | None = None,
     before: Sequence[type] = (),
     after: Sequence[type] = (),
 ) -> Callable[[T], T]: ...
-def as_tagged_item(
+def as_tagged_item[T](
     target: T | None = None,
     /,
     *,

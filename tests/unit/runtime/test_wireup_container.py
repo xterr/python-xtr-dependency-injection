@@ -6,11 +6,10 @@ service locators — never the engine directly.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, final, override
 
 import pytest
 import wireup
-from typing_extensions import override
 from wireup.errors import WireupError
 from xtr_service_contracts import ContainerInterface
 

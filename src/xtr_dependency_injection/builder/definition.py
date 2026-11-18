@@ -4,18 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, TypeAlias
-
-from typing_extensions import override
+from typing import Literal, override
 
 from .on_invalid import OnInvalid
 
 __all__ = ["Decorates", "Definition", "Lifetime", "Origin", "ServiceKey"]
 
-ServiceKey: TypeAlias = tuple[type, Hashable | None]
+type ServiceKey = tuple[type, Hashable | None]
 """``(provided type, qualifier)`` — the identity wireup registers a service under."""
 
-Lifetime: TypeAlias = Literal["singleton", "scoped", "transient"]
+type Lifetime = Literal["singleton", "scoped", "transient"]
 """How long wireup keeps what a definition builds."""
 
 

@@ -12,9 +12,10 @@ annotation, but leaves a string *nested* inside ``Annotated[...]`` a
 ``typing.get_type_hints(obj, include_extras=True)`` resolves those nested
 strings against the object's own module. This one helper marries the two: the
 ``eval_str`` signature for parameter kinds, defaults and order, and the hints
-for the annotations. It lives in the leaf ``exception`` layer so the compiler,
-the decorators and the runtime can all read a caller's annotations the same
-way, and the fix lives in one spot.
+for the annotations, then reads every annotation through the ``type`` aliases it
+is written with (:mod:`._type_aliases`). It lives in the leaf ``exception`` layer
+so the compiler, the decorators and the runtime can all read a caller's
+annotations the same way, and the fix lives in one spot.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import inspect
 from typing import TYPE_CHECKING, get_type_hints
 
 from ._naming import ANNOTATION_HINT, qualified_name
+from ._type_aliases import signature_without_type_aliases
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -43,7 +45,9 @@ def evaluated_signature(
     replaced by the resolved hint from
     ``typing.get_type_hints(..., include_extras=True)`` (a class reads its
     ``__init__`` hints), so a string nested in ``Annotated[...]`` no longer
-    leaks a ``ForwardRef``.
+    leaks a ``ForwardRef``. Every annotation, the return's included, is then
+    read through its ``type`` aliases, so ``type Mailers = Sequence[Mailer]``
+    reads as ``Sequence[Mailer]``.
 
     Args:
         target: The class or callable whose signature to read.
@@ -62,12 +66,12 @@ def evaluated_signature(
         error.add_note(f"while {clause}: {ANNOTATION_HINT}")
         raise
     if not annotations:
-        return signature
+        return signature_without_type_aliases(signature)
     parameters = [
         parameter.replace(annotation=annotations[name]) if name in annotations else parameter
         for name, parameter in signature.parameters.items()
     ]
-    return signature.replace(parameters=parameters)
+    return signature_without_type_aliases(signature.replace(parameters=parameters))
 
 
 def _resolved_annotations(target: Callable[..., object] | type) -> Mapping[str, object]:

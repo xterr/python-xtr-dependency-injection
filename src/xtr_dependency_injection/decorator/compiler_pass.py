@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Final, cast, overload
 
 from xtr_dependency_injection.compiler.compiler_pass_interface import CompilerPassInterface
 from xtr_dependency_injection.compiler.pass_stage import PassStage
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 __all__ = ["CompilerPassMarker", "compiler_pass", "compiler_pass_of"]
 
-P = TypeVar("P", bound=type[CompilerPassInterface])
 
 _ATTRIBUTE: Final = "__xtr_compiler_pass__"
 
@@ -30,12 +29,12 @@ class CompilerPassMarker:
 
 
 @overload
-def compiler_pass(cls: P, /) -> P: ...
+def compiler_pass[P: type[CompilerPassInterface]](cls: P, /) -> P: ...
 @overload
-def compiler_pass(
+def compiler_pass[P: type[CompilerPassInterface]](
     *, stage: PassStage = PassStage.BEFORE_OPTIMIZATION, priority: int = 0
 ) -> Callable[[P], P]: ...
-def compiler_pass(
+def compiler_pass[P: type[CompilerPassInterface]](
     cls: P | None = None,
     /,
     *,

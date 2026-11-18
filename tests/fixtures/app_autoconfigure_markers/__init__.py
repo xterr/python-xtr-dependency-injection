@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing_extensions import override
+from typing import override
+
 from xtr_service_contracts import ResetInterface
 
 from xtr_dependency_injection.decorator.as_service import as_service

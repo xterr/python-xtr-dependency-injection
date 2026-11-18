@@ -23,9 +23,7 @@ import inspect
 import sys
 from collections.abc import Mapping
 from types import ModuleType
-from typing import TYPE_CHECKING, Final, cast, final
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, Final, cast, final, override
 
 from xtr_dependency_injection.bundle._absent_bundle import AbsentBundle
 from xtr_dependency_injection.bundle.bundle import AnyBundle, Bundle

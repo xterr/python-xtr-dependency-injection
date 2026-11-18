@@ -9,10 +9,9 @@ through ``ResetInterface``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
-from typing_extensions import override
 from xtr_service_contracts import ResetInterface
 
 from tests.fixtures.app_autoconfigure import Buffer, StructuralOnly

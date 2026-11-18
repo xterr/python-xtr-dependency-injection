@@ -14,7 +14,7 @@ for a pass that hands them to one service as a collection.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from xtr_dependency_injection.exception import InvalidDefinitionError
 
@@ -26,15 +26,13 @@ if TYPE_CHECKING:
 
 __all__ = ["alias_by_priority", "by_priority"]
 
-_T = TypeVar("_T")
 
-
-def by_priority(
-    items: Iterable[_T],
+def by_priority[T](
+    items: Iterable[T],
     *,
-    priority: Callable[[_T], int],
-    order: Callable[[_T], int],
-) -> list[_T]:
+    priority: Callable[[T], int],
+    order: Callable[[T], int],
+) -> list[T]:
     """Return ``items`` by ``priority`` descending, ties broken by ``order`` ascending.
 
     A stable sort: two items of equal priority keep their relative order,

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
-from typing_extensions import override
 
 from tests.fixtures.app_kernel.services import Greeter
 from tests.support.bundles import EVENTS, ChorusBundle, Echo, EchoBundle, EchoConfig

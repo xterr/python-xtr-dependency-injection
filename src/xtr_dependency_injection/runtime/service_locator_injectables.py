@@ -27,9 +27,8 @@ error wireup gives, exactly as for ``Mapping[Hashable, T]``.
 from __future__ import annotations
 
 import inspect
-import typing
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Any, Final, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, cast, get_args, get_origin
 
 import wireup
 from wireup import AsyncContainer, ScopedAsyncContainer
@@ -46,9 +45,6 @@ if TYPE_CHECKING:
 __all__ = ["service_locator_injectables"]
 
 _MODULE = "xtr_dependency_injection.runtime"
-
-_TYPING_UNION: Final = typing.Union  # pyright: ignore[reportDeprecated] — not an annotation.
-"""``Optional[T]``'s origin before Python 3.14 folds it into ``types.UnionType``."""
 
 
 def service_locator_injectables(definitions: Sequence[Definition]) -> list[object]:
@@ -128,7 +124,7 @@ def _requested_types(definitions: Sequence[Definition]) -> Iterator[type]:
             continue
         try:
             signature = evaluated_signature(provider)
-        except (NameError, TypeError, ValueError):
+        except NameError, TypeError, ValueError:
             continue
         for parameter in signature.parameters.values():
             yield from _service_locator_arguments(cast("object", parameter.annotation))
@@ -161,9 +157,8 @@ def _service_locator_arguments(annotation: object) -> Iterator[type]:
 def _union_members(annotation: object) -> tuple[object, ...]:
     """Return ``annotation``'s union members, or ``annotation`` itself when it is not one."""
     origin = get_origin(annotation)
-    # ``X | None`` has the origin ``UnionType``; ``Optional[X]`` reads back as
-    # ``typing.Union`` until Python 3.14 merges them — each matched by identity.
-    if origin is UnionType or origin is _TYPING_UNION:
+    # ``X | None`` and ``Optional[X]`` both have the origin ``UnionType``.
+    if origin is UnionType:
         return cast("tuple[object, ...]", get_args(annotation))
     return (annotation,)
 

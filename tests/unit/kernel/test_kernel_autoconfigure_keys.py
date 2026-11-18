@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
-from typing_extensions import override
 
 from tests.fixtures.app_marked_iface import Iface, Impl
 from xtr_dependency_injection.bundle import Bundle, as_bundle

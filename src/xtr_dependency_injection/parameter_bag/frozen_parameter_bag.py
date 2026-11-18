@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, NoReturn, override
 
 from xtr_dependency_injection.exception import BuilderFrozenError
 

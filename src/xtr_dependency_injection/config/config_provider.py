@@ -12,6 +12,7 @@ from xtr_dependency_injection.bundle import NoConfig
 from xtr_dependency_injection.decorator.when import when_envs_of, when_not_envs_of
 from xtr_dependency_injection.exception import ConfigProviderError
 from xtr_dependency_injection.exception._naming import ANNOTATION_HINT, qualified_name
+from xtr_dependency_injection.exception._type_aliases import without_type_aliases
 
 from .configure import configure_of
 
@@ -109,11 +110,13 @@ def config_provider_of(
 
 
 def _hints(fn: Callable[..., object], name: str) -> dict[str, object]:
+    """Return ``fn``'s evaluated hints, each read through the ``type`` aliases it holds."""
     try:
-        return cast("dict[str, object]", typing.get_type_hints(fn, include_extras=True))
+        hints = cast("dict[str, object]", typing.get_type_hints(fn, include_extras=True))
     except NameError as error:
         error.add_note(f"while reading config provider {name}: {ANNOTATION_HINT}")
         raise
+    return {key: without_type_aliases(hint) for key, hint in hints.items()}
 
 
 def _form(

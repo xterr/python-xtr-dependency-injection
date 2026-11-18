@@ -9,9 +9,7 @@ handed out, and the types each processor prefix produces, recorded by
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, final, override
 
 from xtr_dependency_injection.config.env_placeholder import EnvPlaceholder, placeholder
 

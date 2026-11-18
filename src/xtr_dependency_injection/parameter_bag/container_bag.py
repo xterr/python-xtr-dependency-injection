@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, final, override
 
 from .container_bag_interface import ContainerBagInterface
 from .frozen_parameter_bag import FrozenParameterBag

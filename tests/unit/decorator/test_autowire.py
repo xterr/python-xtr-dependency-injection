@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Annotated, TypeAlias, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Literal, cast, get_args, get_origin
 
 import pytest
 import wireup
@@ -13,10 +13,14 @@ from wireup.ioc.types import (
     InjectableQualifier,
 )
 
-from xtr_dependency_injection.compiler._wireup_bridge import to_engine_signature
+from xtr_dependency_injection.compiler._wireup_bridge import (
+    parameter_injections,
+    to_engine_signature,
+)
 from xtr_dependency_injection.decorator.autowire import (
     Autowire,
     Injected,
+    bare_service_locator,
     is_container_supplied,
 )
 from xtr_dependency_injection.decorator.target import Target
@@ -174,9 +178,10 @@ def test_target_beside_a_parameter_or_variable_injection_is_refused(marker: Auto
         _ = to_engine_signature(signature)
 
 
-OptionalInjected: TypeAlias = Injected[int] | None
-OptionalTargeted: TypeAlias = Annotated[int, Target("smtp")] | None
-OptionalLocator: TypeAlias = ServiceLocator[int] | None
+# Annotations as values, handed to the function under test: plain expressions, not aliases.
+OptionalInjected = Injected[int] | None
+OptionalTargeted = Annotated[int, Target("smtp")] | None
+OptionalLocator = ServiceLocator[int] | None
 MARKED: list[object] = [
     Injected[int],
     Annotated[int, Autowire(param="kernel.name")],
@@ -201,3 +206,78 @@ def test_a_marked_parameter_is_container_supplied(annotation: object) -> None:
 @pytest.mark.parametrize("annotation", UNMARKED)
 def test_an_unmarked_parameter_is_not_container_supplied(annotation: object) -> None:
     assert not is_container_supplied(annotation)
+
+
+type InjectedInt = Injected[int]
+type ChainedInjected = InjectedInt
+type TargetedInt = Annotated[int, Target("smtp")]
+type FromParameter = Annotated[int, Autowire(param="kernel.name")]
+type FromVariable = Annotated[int, Autowire(env="PORT")]
+type OptionalInjectedAlias = Injected[int] | None
+type IntLocator = ServiceLocator[int]
+type Located[S] = ServiceLocator[S]
+type QualifiedAs[S] = Annotated[S, Target("smtp")]
+type IntAlias = int
+type Ints = list[int]
+type Recursive = list[Recursive] | int
+type Choice = Literal["a", "b"]
+
+ALIASED_MARKED: list[object] = [
+    InjectedInt,
+    ChainedInjected,
+    TargetedInt,
+    FromParameter,
+    FromVariable,
+    OptionalInjectedAlias,
+    InjectedInt | None,
+    IntLocator,
+    IntLocator | None,
+    Located[int],
+    QualifiedAs[int],
+    Injected[IntAlias],
+    Annotated[IntAlias, Target("smtp")],
+    ServiceLocator[IntAlias],
+    Injected[IntLocator],
+]
+ALIASED_UNMARKED: list[object] = [IntAlias, IntAlias | None, Ints, Recursive, Choice]
+
+
+@pytest.mark.parametrize("annotation", ALIASED_MARKED, ids=repr)
+def test_a_parameter_marked_through_an_alias_is_container_supplied(annotation: object) -> None:
+    assert is_container_supplied(annotation)
+
+
+@pytest.mark.parametrize("annotation", ALIASED_UNMARKED, ids=repr)
+def test_an_alias_without_a_marker_is_not_container_supplied(annotation: object) -> None:
+    assert not is_container_supplied(annotation)
+
+
+def test_a_bare_locator_through_an_alias_is_bare() -> None:
+    assert bare_service_locator(IntLocator)
+    assert bare_service_locator(Located[int])
+    assert not bare_service_locator(Injected[IntLocator])
+
+
+def test_a_marker_on_a_member_of_a_union_is_rewritten_in_place() -> None:
+    def target(
+        value: Injected[int] | None, mailer: Annotated[int, Target("smtp")] | None
+    ) -> object:
+        return _echo((value, mailer))
+
+    signature = to_engine_signature(inspect.signature(target, eval_str=True))
+
+    value, none = cast("tuple[object, object]", get_args(_annotations(signature)["value"]))
+    assert none is type(None)
+    assert isinstance(_unwrapped(_metadata(value)[0]), EmptyContainerInjectionRequest)
+    mailer, none = cast("tuple[object, object]", get_args(_annotations(signature)["mailer"]))
+    assert none is type(None)
+    qualifier = _unwrapped(_metadata(mailer)[0])
+    assert isinstance(qualifier, InjectableQualifier)
+    assert qualifier.qualifier == "smtp"
+
+
+def test_a_parameter_injection_on_a_member_of_a_union_is_resolved_by_the_caller() -> None:
+    def target(name: Annotated[str, Autowire(param="kernel.name")] | None) -> object:
+        return _echo(name)
+
+    assert parameter_injections(inspect.signature(target, eval_str=True)) == ("name",)

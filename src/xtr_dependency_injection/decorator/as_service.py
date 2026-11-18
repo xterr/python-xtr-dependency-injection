@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Final, cast, overload
 
 from xtr_dependency_injection.builder.definition import Lifetime
 
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 __all__ = ["ServiceMarker", "as_service", "service_of"]
 
-T = TypeVar("T")
 
 _SERVICE: Final = "__xtr_service__"
 
@@ -39,12 +38,12 @@ class ServiceMarker:
 
 
 @overload
-def as_service(target: T, /) -> T: ...
+def as_service[T](target: T, /) -> T: ...
 @overload
-def as_service(
+def as_service[T](
     *, lifetime: Lifetime | None = None, qualifier: Hashable | None = None
 ) -> Callable[[T], T]: ...
-def as_service(
+def as_service[T](
     target: T | None = None,
     /,
     *,

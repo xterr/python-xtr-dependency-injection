@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final, cast
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, Final, cast, override
 
 from xtr_dependency_injection.config._walk import rebuild
 from xtr_dependency_injection.config.env_placeholder import EnvPlaceholder

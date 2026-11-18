@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 __all__ = ["CheckDefinitionValidityPass", "invalid_arguments"]
 
-_LIFETIMES: Final = frozenset(get_args(Lifetime))
+_LIFETIMES: Final = frozenset(get_args(Lifetime.__value__))
 _BY_KEYWORD: Final = frozenset(
     {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
 )

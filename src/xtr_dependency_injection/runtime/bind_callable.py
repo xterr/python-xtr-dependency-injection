@@ -24,6 +24,7 @@ from xtr_dependency_injection.compiler._wireup_bridge import (
 from xtr_dependency_injection.exception import InvalidArgumentTypeError, UnitOfWorkClosedError
 from xtr_dependency_injection.exception._naming import qualified_name
 from xtr_dependency_injection.exception._signatures import evaluated_signature
+from xtr_dependency_injection.exception._type_aliases import signature_without_type_aliases
 from xtr_dependency_injection.runtime._scope_exit import closing_scope
 from xtr_dependency_injection.runtime._unit_scope import (
     counted,
@@ -120,8 +121,11 @@ def bind_callable(
         msg = "bind_callable needs a kernel-provided container"
         raise InvalidArgumentTypeError(msg)
     engine = container._engine()  # noqa: SLF001 — the binder owns the WireupContainer contract.  # pyright: ignore[reportPrivateUsage]
+    # A signature the caller hands over is read through its aliases as our own reading is.
     declared = mark_bare_locator_injections(
-        signature if signature is not None else _signature_of(target)
+        signature_without_type_aliases(signature)
+        if signature is not None
+        else _signature_of(target)
     )
     presented = to_engine_signature(declared)
     resolved_names = parameter_injections(declared)

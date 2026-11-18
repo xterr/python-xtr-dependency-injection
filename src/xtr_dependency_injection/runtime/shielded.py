@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from xtr_dependency_injection._text import safe_repr
 
@@ -14,10 +14,8 @@ if TYPE_CHECKING:
 
 __all__ = ["shielded"]
 
-T = TypeVar("T")
 
-
-async def shielded(coro: Coroutine[object, Never, T], *, timeout: float) -> T:  # noqa: ASYNC109 — the deadline bounds the work itself; a caller's timeout would only cancel the wait, which this outlasts
+async def shielded[T](coro: Coroutine[object, Never, T], *, timeout: float) -> T:  # noqa: ASYNC109 — the deadline bounds the work itself; a caller's timeout would only cancel the wait, which this outlasts
     """Run ``coro`` to its end, whatever cancels the caller meanwhile, within ``timeout`` seconds.
 
     Closing what a unit of work opened is not optional: cancelled halfway, a

@@ -8,7 +8,7 @@ exist; the scan report says why.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from ._marker import own_marker, set_marker
 
@@ -17,13 +17,12 @@ if TYPE_CHECKING:
 
 __all__ = ["matches_env", "when", "when_envs_of", "when_not", "when_not_envs_of"]
 
-T = TypeVar("T")
 
 _WHEN: Final = "__xtr_when__"
 _WHEN_NOT: Final = "__xtr_when_not__"
 
 
-def when(env: str, /, *envs: str) -> Callable[[T], T]:
+def when[T](env: str, /, *envs: str) -> Callable[[T], T]:
     """Keep the decorated object to the given environments.
 
     Repeating it widens the set: ``@when("dev") @when("test")`` is
@@ -32,7 +31,7 @@ def when(env: str, /, *envs: str) -> Callable[[T], T]:
     return _adding(_WHEN, (env, *envs))
 
 
-def when_not(env: str, /, *envs: str) -> Callable[[T], T]:
+def when_not[T](env: str, /, *envs: str) -> Callable[[T], T]:
     """Leave the decorated object out of the given environments.
 
     Repeating it widens the set. Combined with ``@when``, both must pass.
@@ -57,7 +56,7 @@ def matches_env(obj: object, env: str) -> bool:
     return (included is None or env in included) and (excluded is None or env not in excluded)
 
 
-def _adding(name: str, envs: tuple[str, ...]) -> Callable[[T], T]:
+def _adding[T](name: str, envs: tuple[str, ...]) -> Callable[[T], T]:
     def record(obj: T) -> T:
         current = cast("frozenset[str] | None", own_marker(obj, name)) or frozenset()
         return set_marker(obj, name, current | frozenset(envs))

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, override
 
 from xtr_dependency_injection.builder import Origin
 from xtr_dependency_injection.builder.container_builder import ContainerBuilder

@@ -4,8 +4,8 @@
 
 **A bundle and kernel layer for Python, compiled to a wireup container.**
 
-<img alt="python 3.11+" src="https://img.shields.io/badge/python-%E2%89%A5%203.11-3776AB?logo=python&logoColor=white">
-<img alt="core dependencies: 3" src="https://img.shields.io/badge/core%20deps-3-3FB950">
+<img alt="python 3.14+" src="https://img.shields.io/badge/python-%E2%89%A5%203.14-3776AB?logo=python&logoColor=white">
+<img alt="core dependencies: 2" src="https://img.shields.io/badge/core%20deps-2-3FB950">
 <img alt="typed" src="https://img.shields.io/badge/typed-ty%20%2B%20basedpyright-1f6feb">
 <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
 
@@ -34,7 +34,7 @@ ships a bundle, never imports wireup.
 - 🌗 **Per environment** — `@when("prod")` on anything scanned, or a `config/packages/<env>/` folder imported only there; a bundle activated only for `dev` never runs elsewhere.
 - 🧱 **Per kernel** — two kernels in one process share no container, no registry, no import side effect.
 - 🔍 **Explainable** — every bundle, config step and override is recorded, and printable.
-- 🪶 **Three dependencies** — `wireup`, `typing-extensions` and `xtr-service-contracts`.
+- 🪶 **Two dependencies** — `wireup` and `xtr-service-contracts`.
 
 ```python
 kernel = Kernel(__package__)  # in app/kernel.py

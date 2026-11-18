@@ -9,12 +9,11 @@ built only when asked for by name — in the scope the consumer was resolved in.
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
-from typing import TYPE_CHECKING, cast, final
+from typing import TYPE_CHECKING, cast, final, override
 
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import HTTPConnection
-from typing_extensions import override
 
 from tests.fixtures.app_tagged_aliases import Step as AliasedStep
 from xtr_dependency_injection import (

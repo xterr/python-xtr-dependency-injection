@@ -10,9 +10,8 @@ asked for by name. It implements :class:`ServiceCollectionInterface` from
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Generic, TypeVar, cast, final
+from typing import TYPE_CHECKING, cast, final, override
 
-from typing_extensions import override
 from xtr_service_contracts import ServiceCollectionInterface
 
 from xtr_dependency_injection.exception import UnknownLocatorKeyError
@@ -26,11 +25,9 @@ if TYPE_CHECKING:
 
 __all__ = ["ServiceLocator"]
 
-T = TypeVar("T")
-
 
 @final
-class ServiceLocator(ServiceCollectionInterface[T], Generic[T]):
+class ServiceLocator[T](ServiceCollectionInterface[T]):
     """Builds services by name, from a container, only when asked.
 
     Build one inside a factory that takes ``container: ContainerInterface``::

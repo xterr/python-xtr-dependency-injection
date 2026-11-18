@@ -9,7 +9,7 @@ narrower operations.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar, cast, final, overload
+from typing import TYPE_CHECKING, cast, final, overload
 
 from xtr_dependency_injection.compiler.pass_stage import PassStage
 from xtr_dependency_injection.exception import (
@@ -37,8 +37,6 @@ if TYPE_CHECKING:
     )
 
 __all__ = ["ContainerBuilder"]
-
-C = TypeVar("C")
 
 
 @final
@@ -300,8 +298,8 @@ class ContainerBuilder:
     @overload
     def get_extension_config(self, bundle: str, /) -> object: ...
     @overload
-    def get_extension_config(self, bundle: type[C], /) -> C: ...
-    def get_extension_config(self, bundle: str | type[C], /) -> object:
+    def get_extension_config[C](self, bundle: type[C], /) -> C: ...
+    def get_extension_config[C](self, bundle: str | type[C], /) -> object:
         """Return the resolved config of a bundle, by name or by config type.
 
         Raises:
@@ -319,7 +317,7 @@ class ContainerBuilder:
                 return cast("C", value)
         raise UnknownConfigTypeError(f"get_extension_config by {self._origin}", bundle, None)
 
-    def prepend_extension_config(
+    def prepend_extension_config[C](
         self, bundle: str | type[C], transform: Callable[[C], C], /
     ) -> None:
         """Adjust another bundle's config, before it is loaded.

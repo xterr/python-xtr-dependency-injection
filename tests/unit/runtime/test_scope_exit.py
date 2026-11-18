@@ -10,12 +10,11 @@ from collections.abc import (
     AsyncIterator,  # noqa: TC003 — the engine reads the factories' return annotations
 )
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, final, override
 
 import anyio
 import pytest
 import wireup
-from typing_extensions import override
 
 from xtr_dependency_injection import unit_of_work
 from xtr_dependency_injection.exception import ScopeTeardownTimeoutError

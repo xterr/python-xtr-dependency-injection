@@ -12,10 +12,9 @@ from __future__ import annotations
 # wireup evaluates a factory's return annotation while the container builds, so
 # ``Iterator`` cannot be deferred into a ``TYPE_CHECKING`` block.
 from collections.abc import Iterator  # noqa: TC003
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
-from typing_extensions import override
 
 from xtr_dependency_injection.bundle import Bundle, as_bundle, required_bundle
 from xtr_dependency_injection.kernel import Kernel

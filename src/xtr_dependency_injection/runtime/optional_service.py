@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
@@ -11,14 +11,12 @@ if TYPE_CHECKING:
 
 __all__ = ["optional_service"]
 
-_T = TypeVar("_T")
 
-
-async def optional_service(
+async def optional_service[T](
     container: ContainerInterface,
-    service: type[_T],
+    service: type[T],
     qualifier: Hashable | None = None,
-) -> _T | None:
+) -> T | None:
     """Return the service, or ``None`` when the container does not provide it.
 
     For a bundle whose services use a peer's only when that peer is active —

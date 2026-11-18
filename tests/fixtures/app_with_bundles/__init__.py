@@ -8,7 +8,7 @@ build environment (or ``"all"``).
 
 from __future__ import annotations
 
-from typing_extensions import override
+from typing import override
 
 from xtr_dependency_injection.bundle import Bundle, as_bundle
 

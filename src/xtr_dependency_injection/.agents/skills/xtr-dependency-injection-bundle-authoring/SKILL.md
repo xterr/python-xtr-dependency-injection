@@ -112,7 +112,8 @@ class MailConfig:
 
 ```python
 # acme_mail/bundle/mail_bundle.py
-from typing_extensions import override
+from typing import override
+
 from xtr_dependency_injection import (
     Bundle,
     ContainerBuilder,

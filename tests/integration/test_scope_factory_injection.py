@@ -10,10 +10,9 @@ from __future__ import annotations
 from collections.abc import (
     AsyncIterator,  # noqa: TC003 — the engine reads the factory's return annotation
 )
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, final, override
 
 import pytest
-from typing_extensions import override
 
 from xtr_dependency_injection import (
     Bundle,

@@ -69,6 +69,16 @@ def test_one_resolver_per_kind_key_and_qualifier() -> None:
     assert provider("env", "int:PORT") is not provider("param", "int:PORT")
 
 
+type ServiceAlias = Service
+type ChainedService = ServiceAlias
+
+
+def test_a_service_key_written_with_an_alias_resolves_the_type_it_stands_for() -> None:
+    # The framework hands a marker the type it reads off the route parameter, alias and all.
+    assert provider("service", ServiceAlias, None) is provider("service", Service, None)
+    assert provider("service", ChainedService, "a") is provider("service", Service, "a")
+
+
 def test_a_resolver_is_flagged_and_named() -> None:
     resolve = provider("param", "kernel.name")
 

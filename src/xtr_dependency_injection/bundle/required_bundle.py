@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from xtr_dependency_injection.exception import BundleDefinitionError
 
@@ -30,8 +30,6 @@ REQUIRED_BUNDLES_ATTRIBUTE: Final = "__xtr_required_bundles__"
 
 _STRING_TARGET: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$")
 
-B = TypeVar("B", bound=type[AnyBundle])
-
 
 @dataclass(frozen=True, slots=True)
 class RequiredBundle:
@@ -47,7 +45,7 @@ class RequiredBundle:
     ignore_on_invalid: bool = False
 
 
-def required_bundle(
+def required_bundle[B: type[AnyBundle]](
     target: str | type[AnyBundle],
     /,
     *,

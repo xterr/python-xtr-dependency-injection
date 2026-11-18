@@ -8,10 +8,9 @@ engine's message verbatim, and the engine error stays reachable as
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, final, override
 
 import pytest
-from typing_extensions import override
 from wireup.errors import WireupError
 
 from xtr_dependency_injection import Bundle, Kernel, ServiceConfigurator, as_bundle

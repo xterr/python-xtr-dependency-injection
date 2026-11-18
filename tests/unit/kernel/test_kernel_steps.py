@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import override
 
 import pytest
-from typing_extensions import override
 
 from tests.support.bundles import EchoBundle, EchoConfig
 from xtr_dependency_injection.builder import Definition, Origin, ServiceKey

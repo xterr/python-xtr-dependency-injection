@@ -8,11 +8,9 @@ the parent's decision twice.
 
 from __future__ import annotations
 
-from typing import TypeVar, cast
+from typing import cast
 
 __all__ = ["own_marker", "set_marker"]
-
-T = TypeVar("T")
 
 
 def own_marker(obj: object, name: str) -> object | None:
@@ -21,7 +19,7 @@ def own_marker(obj: object, name: str) -> object | None:
     return namespace.get(name)
 
 
-def set_marker(obj: T, name: str, value: object) -> T:
+def set_marker[T](obj: T, name: str, value: object) -> T:
     """Set the marker ``name`` on ``obj`` and return ``obj`` unchanged otherwise."""
     setattr(obj, name, value)
     return obj

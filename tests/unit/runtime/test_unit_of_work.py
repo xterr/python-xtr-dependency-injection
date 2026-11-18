@@ -9,12 +9,11 @@ from collections.abc import (
     AsyncIterator,  # noqa: TC003 — the engine reads the factory's return annotation
 )
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, TypeVar, final
+from typing import TYPE_CHECKING, final, override
 
 import anyio
 import pytest
 import wireup
-from typing_extensions import override
 from xtr_service_contracts import ContainerInterface
 
 from tests.fixtures import app_hung_teardown, app_slow_scoped, app_unit_producer
@@ -40,7 +39,6 @@ from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
-T = TypeVar("T")
 
 pytestmark = pytest.mark.anyio
 
@@ -596,7 +594,7 @@ async def test_a_unit_closing_after_the_waiting_loop_closed_keeps_its_own_outcom
 @final
 class _Foreign(ContainerInterface):
     @override
-    async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
+    async def get[T](self, service: type[T], /, qualifier: Hashable | None = None) -> T:
         raise LookupError(service, qualifier)
 
     @override

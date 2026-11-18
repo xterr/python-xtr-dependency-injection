@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import FunctionType
-from typing import Annotated, Generic, TypeVar
+from typing import Annotated
 
 import pytest
 import wireup
@@ -13,8 +13,6 @@ from wireup import Inject
 from xtr_dependency_injection.compiler._registration import synthesize_class_factory
 
 pytestmark = pytest.mark.anyio
-
-T = TypeVar("T")
 
 
 class Dependency:
@@ -60,7 +58,7 @@ class KeywordOnly:
         self.dependency: Dependency = dependency
 
 
-class GenericBase(Generic[T]):
+class GenericBase[T]:
     def __init__(self, dependency: Dependency) -> None:
         self.dependency: Dependency = dependency
 

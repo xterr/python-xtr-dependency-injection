@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Final, TypeVar, cast
+from typing import Final, cast
 
 from xtr_dependency_injection.builder.definition import Lifetime
 
@@ -29,7 +29,6 @@ __all__ = [
     "autoconfigure_tags_of",
 ]
 
-T = TypeVar("T", bound=type)
 
 _AUTOCONFIGURE: Final = "__xtr_autoconfigure__"
 _AUTOCONFIGURE_TAGS: Final = "__xtr_autoconfigure_tags__"
@@ -77,7 +76,7 @@ class AutoconfigureTagMarker:
     )
 
 
-def autoconfigure(
+def autoconfigure[T: type](
     *,
     tags: Sequence[TagEntry] = (),
     lifetime: Lifetime | None = None,
@@ -96,7 +95,9 @@ def autoconfigure(
     return mark
 
 
-def autoconfigure_tag(name: str | None = None, /, **attributes: object) -> Callable[[T], T]:
+def autoconfigure_tag[T: type](
+    name: str | None = None, /, **attributes: object
+) -> Callable[[T], T]:
     """Record a single tag rule on this class.
 
     Repeatable: several ``@autoconfigure_tag(...)`` on one class accumulate.

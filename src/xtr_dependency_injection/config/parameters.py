@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from xtr_dependency_injection.decorator._marker import own_marker, set_marker
 from xtr_dependency_injection.exception import ConfigProviderError, ParameterConflictError
@@ -22,13 +22,12 @@ if TYPE_CHECKING:
 
 __all__ = ["call_parameters", "is_parameters", "merge_parameters", "parameters"]
 
-F = TypeVar("F", bound="Callable[..., object]")
 
 _PARAMETERS: Final = "__xtr_parameters__"
 _ABSENT: Final = object()
 
 
-def parameters(fn: F, /) -> F:
+def parameters[F: "Callable[..., object]"](fn: F, /) -> F:
     """Merge what the decorated ``def () -> Mapping[str, object]`` returns into the parameters."""
     return set_marker(fn, _PARAMETERS, True)  # noqa: FBT003 — a marker's value, not a flag argument.
 

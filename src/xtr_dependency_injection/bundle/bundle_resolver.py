@@ -23,7 +23,7 @@ import heapq
 import importlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from xtr_dependency_injection.diagnostics import BundleReport
 from xtr_dependency_injection.exception import (
@@ -46,7 +46,7 @@ __all__ = ["ListedBundles", "ResolvedBundles", "resolve_bundles"]
 Source = Literal["kernel", "listed", "required"]
 State = Literal["active", "skipped", "env_disabled"]
 
-ListedBundles: TypeAlias = (
+type ListedBundles = (
     Mapping[type[AnyBundle], Mapping[str, bool]]
     | Mapping[type[AnyBundle] | AbsentBundle, Mapping[str, bool]]
 )

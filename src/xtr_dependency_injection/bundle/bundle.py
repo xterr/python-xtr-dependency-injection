@@ -16,9 +16,7 @@ around the container's life — the last two taking their container from
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, Generic, TypeAlias, final
-
-from typing_extensions import TypeVar
+from typing import TYPE_CHECKING, Any, Final, final
 
 from xtr_dependency_injection.exception import BundleDefinitionError
 from xtr_dependency_injection.exception._naming import qualified_name
@@ -47,10 +45,7 @@ class NoConfig:
     """The config of a bundle that takes none. Never registered, never configurable."""
 
 
-ConfigT = TypeVar("ConfigT", default=NoConfig)
-
-
-class Bundle(Generic[ConfigT]):
+class Bundle[ConfigT = NoConfig]:
     """Base class of every bundle; declare one with ``@as_bundle``.
 
     A bundle is built with no arguments — discovery builds it that way — and
@@ -139,4 +134,4 @@ class Bundle(Generic[ConfigT]):
 
 # A bundle of whichever config type: only each bundle knows its own, and a
 # bundle's config appears in a parameter position, so no variance helps.
-AnyBundle: TypeAlias = Bundle[Any]  # pyright: ignore[reportExplicitAny]
+type AnyBundle = Bundle[Any]  # pyright: ignore[reportExplicitAny]

@@ -40,9 +40,7 @@ import re
 import secrets
 from collections.abc import Mapping
 from enum import Enum
-from typing import TYPE_CHECKING, Final, final
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, Final, final, override
 
 from xtr_dependency_injection.exception import (
     EnvPlaceholderError,
@@ -128,7 +126,7 @@ class EnvPlaceholder:
             return value
         try:
             return self.cast(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             # ``from None``: the cast's own error quotes the value, which may
             # be a secret; the typed error keeps it in ``value``, off the message.
             raise InvalidEnvironmentVariableError(self.expression, self.cast, str(value)) from None

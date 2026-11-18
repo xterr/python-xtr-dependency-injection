@@ -13,6 +13,7 @@ from xtr_dependency_injection.compiler._wireup_bridge import (
     parameter_injections,
     to_engine_signature,
 )
+from xtr_dependency_injection.exception._type_aliases import signature_without_type_aliases
 from xtr_dependency_injection.runtime._unit_scope import mark_shut_down, units_drained
 from xtr_dependency_injection.runtime.wireup_container import WireupContainer
 
@@ -151,9 +152,10 @@ def _prepare_for_engine(
     injected from a parameter or the environment has its placeholders
     resolved by ``resolver`` first, so the wrapper is then async.
     """
-    original = mark_bare_locator_injections(inspect.signature(fn, eval_str=True))
+    written = inspect.signature(fn, eval_str=True)
+    original = mark_bare_locator_injections(signature_without_type_aliases(written))
     rewritten = to_engine_signature(original)
-    if rewritten is original:
+    if rewritten is written:
         return fn
     resolved_names = parameter_injections(original)
 

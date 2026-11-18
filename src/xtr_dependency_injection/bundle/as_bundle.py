@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from xtr_dependency_injection.exception import BundleDefinitionError
 
@@ -16,13 +16,12 @@ if TYPE_CHECKING:
 
 __all__ = ["as_bundle", "declare_bundle"]
 
-B = TypeVar("B", bound=type[AnyBundle])
 
 _NAME: Final = re.compile(r"^[a-z][a-z0-9_]*$")
 _RESERVED: Final = frozenset({KERNEL_BUNDLE})
 
 
-def as_bundle(
+def as_bundle[B: type[AnyBundle]](
     name: str,
     /,
     *,
@@ -61,7 +60,7 @@ def as_bundle(
     )
 
 
-def declare_bundle(metadata: BundleMetadata) -> Callable[[B], B]:
+def declare_bundle[B: type[AnyBundle]](metadata: BundleMetadata) -> Callable[[B], B]:
     """Return the decorator recording ``metadata``, after validating it — reserved names allowed."""
     if not _NAME.match(metadata.name):
         raise BundleDefinitionError(

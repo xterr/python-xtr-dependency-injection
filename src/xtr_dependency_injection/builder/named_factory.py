@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import types
 
 __all__ = ["named_factory"]
 
-_F = TypeVar("_F", bound=Callable[..., object])
 
-
-def named_factory(factory: _F, name: str) -> _F:
+def named_factory[F: Callable[..., object]](factory: F, name: str) -> F:
     """Name ``factory`` ``name`` and return it.
 
     A bundle registering one factory per configured name — a store per lock

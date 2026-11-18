@@ -21,19 +21,16 @@ while the kernel builds, so validation sees a plausible number.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, TypeVar, overload
+from typing import TYPE_CHECKING, overload
 
 from .env_placeholder import MISSING, Missing, placeholder
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from typing_extensions import TypeIs
+    from typing import TypeIs
 
 __all__ = ["MISSING", "Missing", "env"]
 
-T = TypeVar("T")
-D = TypeVar("D")
 
 _PREFIX_OF: dict[object, str] = {str: "string", int: "int", float: "float", bool: "bool"}
 
@@ -41,11 +38,11 @@ _PREFIX_OF: dict[object, str] = {str: "string", int: "int", float: "float", bool
 @overload
 def env(name: str, /) -> str: ...
 @overload
-def env(name: str, /, *, default: D) -> str | D: ...
+def env[D](name: str, /, *, default: D) -> str | D: ...
 @overload
-def env(name: str, cast: Callable[[str], T], /) -> T: ...
+def env[T](name: str, cast: Callable[[str], T], /) -> T: ...
 @overload
-def env(name: str, cast: Callable[[str], T], /, *, default: D) -> T | D: ...
+def env[T, D](name: str, cast: Callable[[str], T], /, *, default: D) -> T | D: ...
 def env(
     name: str,
     converter: Callable[[str], object] | None = None,

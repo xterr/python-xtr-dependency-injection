@@ -16,7 +16,7 @@ type it is.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Final, cast, overload
 
 from xtr_dependency_injection.decorator._marker import own_marker, set_marker
 
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 
 __all__ = ["ConfigureMarker", "configure", "configure_of"]
 
-F = TypeVar("F", bound="Callable[..., object]")
 
 _CONFIGURE: Final = "__xtr_configure__"
 
@@ -38,10 +37,12 @@ class ConfigureMarker:
 
 
 @overload
-def configure(fn: F, /) -> F: ...
+def configure[F: "Callable[..., object]"](fn: F, /) -> F: ...
 @overload
-def configure(*, priority: int = 0) -> Callable[[F], F]: ...
-def configure(fn: F | None = None, /, *, priority: int = 0) -> F | Callable[[F], F]:
+def configure[F: "Callable[..., object]"](*, priority: int = 0) -> Callable[[F], F]: ...
+def configure[F: "Callable[..., object]"](
+    fn: F | None = None, /, *, priority: int = 0
+) -> F | Callable[[F], F]:
     """Provide or transform a bundle's config from the decorated function.
 
     Transforms run by ``priority``, highest first, then in scan order. Put

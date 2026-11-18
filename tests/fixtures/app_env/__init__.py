@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
-from typing import Annotated, ClassVar
-
-from typing_extensions import override
+from typing import Annotated, ClassVar, override
 
 from xtr_dependency_injection import (
     Autowire,

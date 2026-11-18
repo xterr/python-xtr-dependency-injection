@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import importlib
 from importlib.metadata import EntryPoint
-from typing import TYPE_CHECKING, final
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, final, override
 
 from tests.support.bundles import ChorusBundle, EchoBundle
 from xtr_dependency_injection.bundle import (

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Annotated, Literal
+from typing import Annotated, Literal, override
 
 import pytest
 import wireup
-from typing_extensions import override
 from wireup.errors import WireupError
 
 from xtr_dependency_injection.builder import Definition, Origin, ServiceKey

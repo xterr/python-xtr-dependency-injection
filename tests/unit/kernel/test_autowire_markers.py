@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, override
 
 import pytest
 import wireup
-from typing_extensions import override
 
 from xtr_dependency_injection import Autowire, Bundle, Kernel, Target, as_bundle
 from xtr_dependency_injection.kernel.booted_kernel import call_injected

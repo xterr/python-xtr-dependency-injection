@@ -274,3 +274,16 @@ def test_an_alias_of_field_whose_type_cannot_be_resolved_is_an_error_not_a_dropp
     assert any(
         "ForwardsATypeImportedForTypeCheckingOnly" in note for note in caught.value.__notes__
     )
+
+
+type ForwardedMail = Annotated[MailConfig | None, AliasOf("mail")]
+
+
+@dataclass(frozen=True)
+class AliasedForwardConfig:
+    mail: ForwardedMail = None
+    others: Annotated[ForwardedMail, "kept"] = None
+
+
+def test_a_forwarding_declared_through_an_alias_is_found() -> None:
+    assert alias_of_fields(AliasedForwardConfig) == [("mail", "mail"), ("others", "mail")]

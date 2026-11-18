@@ -14,9 +14,11 @@ when copying a factory, keeping the mark out of the clone.
 
 from __future__ import annotations
 
-import typing
+import inspect
+from functools import reduce
+from operator import or_
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Any, Final, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, cast, get_args, get_origin
 
 import wireup
 from wireup.ioc.registry import _function_get_unwrapped_return_type
@@ -26,9 +28,9 @@ from xtr_dependency_injection.config.env_placeholder import env_parameter
 from xtr_dependency_injection.decorator.autowire import Autowire, bare_service_locator
 from xtr_dependency_injection.decorator.target import Target
 from xtr_dependency_injection.exception import InvalidArgumentError, InvalidArgumentTypeError
+from xtr_dependency_injection.exception._type_aliases import without_type_aliases
 
 if TYPE_CHECKING:
-    import inspect
     from collections.abc import Callable, Hashable, Mapping
 
     from wireup import AsyncContainer
@@ -48,9 +50,6 @@ __all__ = [
 
 REGISTRATION_ATTRIBUTE = "__wireup_registration__"
 """Where ``@injectable`` records its declaration on what it marks."""
-
-_TYPING_UNION: Final = typing.Union  # pyright: ignore[reportDeprecated] — not an annotation.
-"""``Optional[T]``'s origin, bound once so the deprecation note is stated once."""
 
 
 def is_registered(container: AsyncContainer, service: type, qualifier: Hashable | None) -> bool:
@@ -81,7 +80,9 @@ def key_type(provider: Callable[..., object] | type) -> type:
     class is itself, a function is its return annotation evaluated against its
     module, a generator function is the type it yields. It is then normalized
     the way wireup normalizes it, so ``Annotated`` wrappers are stripped and an
-    optional return stays ``T | None``.
+    optional return stays ``T | None``. A ``type`` alias is read as what it
+    stands for — the clone the engine registers carries the same expanded
+    return (see ``clone_function``), so both agree on the key.
 
     Raises:
         InvalidArgumentTypeError: If ``provider`` is a function without a
@@ -89,10 +90,27 @@ def key_type(provider: Callable[..., object] | type) -> type:
     """
     implementation = cast("object | None", _function_get_unwrapped_return_type(provider))
     if implementation is None:
+        implementation = _aliased_yield_type(provider)
+    if implementation is None:
         name = getattr(provider, "__qualname__", repr(provider))
         reason = f"factory {name} must annotate its return type: that is the service it provides"
         raise InvalidArgumentTypeError(reason)
-    return analyze_type(implementation).normalized_type
+    return analyze_type(without_type_aliases(implementation)).normalized_type
+
+
+def _aliased_yield_type(provider: Callable[..., object] | type) -> object | None:
+    """Return what a generator factory yields when its return is an alias of the iterator.
+
+    wireup reads the yielded type off the return's arguments, and an alias —
+    ``type Sessions = Iterator[Session]`` — has none until expanded.
+    """
+    if isinstance(provider, type) or not (
+        inspect.isgeneratorfunction(provider) or inspect.isasyncgenfunction(provider)
+    ):
+        return None
+    returned: object = inspect.signature(provider, eval_str=True).return_annotation
+    arguments = cast("tuple[object, ...]", get_args(without_type_aliases(returned)))
+    return arguments[0] if arguments else None
 
 
 def to_engine_signature(signature: inspect.Signature) -> inspect.Signature:
@@ -109,6 +127,9 @@ def to_engine_signature(signature: inspect.Signature) -> inspect.Signature:
 
     A signature without any of our markers is returned unchanged, so this
     helper is safe to apply on every callable presented to wireup.
+
+    A marker on a member of a union — ``Injected[T] | None`` — is rewritten in
+    place: the engine reads ``Annotated`` through an optional the same way.
     """
     parameters = list(signature.parameters.values())
     changed = False
@@ -124,6 +145,15 @@ def to_engine_signature(signature: inspect.Signature) -> inspect.Signature:
 
 def _rewrite_annotation(annotation: object) -> object | None:
     """Return a rewritten ``Annotated[...]`` or ``None`` when nothing changed."""
+    if get_origin(annotation) is UnionType:
+        members = cast("tuple[object, ...]", get_args(annotation))
+        rewritten = [_rewrite_annotation(member) for member in members]
+        if all(member is None for member in rewritten):
+            return None
+        merged = [
+            new if new is not None else old for new, old in zip(rewritten, members, strict=True)
+        ]
+        return reduce(or_, merged)
     if get_origin(annotation) is not Annotated:
         return None
     wrapped, *metadata = cast("tuple[object, ...]", get_args(annotation))
@@ -207,6 +237,9 @@ def parameter_injections(signature: inspect.Signature) -> tuple[str, ...]:
 
 
 def _metadata(annotation: object) -> tuple[object, ...]:
+    if get_origin(annotation) is UnionType:
+        members = cast("tuple[object, ...]", get_args(annotation))
+        return tuple(entry for member in members for entry in _metadata(member))
     if get_origin(annotation) is not Annotated:
         return ()
     return cast("tuple[object, ...]", get_args(annotation))[1:]
@@ -255,12 +288,10 @@ def built_type(definition: Definition) -> type | None:
 def _non_optional(annotation: object) -> object:
     """Return ``annotation``'s single non-``None`` member, or ``annotation`` unchanged.
 
-    Both union spellings are matched: ``T | None`` reads back as
-    :data:`types.UnionType`, ``Optional[T]`` as :data:`typing.Union`, and the
-    two are one object from Python 3.14 on.
+    ``T | None`` and ``Optional[T]`` both read back as :data:`types.UnionType`.
     """
     origin = get_origin(annotation)
-    if origin is UnionType or origin is _TYPING_UNION:
+    if origin is UnionType:
         members = [arg for arg in get_args(annotation) if arg is not type(None)]
         if len(members) == 1:
             return members[0]

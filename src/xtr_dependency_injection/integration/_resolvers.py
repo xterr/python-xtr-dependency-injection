@@ -19,6 +19,7 @@ from starlette.requests import HTTPConnection  # noqa: TC002 — read at runtime
 from wireup import AsyncContainer
 
 from xtr_dependency_injection.exception import FastapiIntegrationError
+from xtr_dependency_injection.exception._type_aliases import without_type_aliases
 from xtr_dependency_injection.runtime._detached_variables import register_detached_variable
 from xtr_dependency_injection.runtime._scope_exit import closing_scope
 from xtr_dependency_injection.runtime._unit_scope import (
@@ -179,7 +180,7 @@ def request_scope(app: Starlette, connection_scope: Scope) -> AbstractAsyncConte
 
 
 @asynccontextmanager
-async def _request_scope(app: Starlette, connection_scope: Scope) -> AsyncGenerator[None, None]:
+async def _request_scope(app: Starlette, connection_scope: Scope) -> AsyncGenerator[None]:
     attached = attached_kernel(app)
     if attached is None:
         raise FastapiIntegrationError(NO_KERNEL)
@@ -288,7 +289,12 @@ def provider(
     resolver reads the scope :func:`request_scope` parked on the connection
     it is handed; a ``param`` or ``env`` resolver reads the container the
     seam's ``attach`` stored on the application the connection belongs to.
+
+    A ``service`` key the framework read off a ``type`` alias —
+    ``Injected[Mailer]`` with ``type Mailer = Smtp`` — is the type it stands for.
     """
+    if kind == "service":
+        key = without_type_aliases(key)
     cache_key = (kind, key, qualifier)
     cached = _PROVIDERS.get(cache_key)
     if cached is not None:

@@ -8,7 +8,7 @@ mapping, and every tag must hold.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from xtr_dependency_injection.exception import InvalidArgumentTypeError
 
@@ -22,10 +22,8 @@ REMOVE_IF_MISSING_TAG: Final = "container.remove_if_missing"
 
 _ATTRIBUTE: Final = "__xtr_remove_if_missing__"
 
-T = TypeVar("T", bound=type)
 
-
-def remove_if_missing(
+def remove_if_missing[T: type](
     *,
     service: type | None = None,
     qualifier: Hashable | None = None,

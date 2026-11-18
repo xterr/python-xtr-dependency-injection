@@ -18,9 +18,8 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, final, override
 
-from typing_extensions import override
 from wireup import AsyncContainer
 from xtr_service_contracts import ContainerInterface, ResetInterface, UnitParticipantInterface
 

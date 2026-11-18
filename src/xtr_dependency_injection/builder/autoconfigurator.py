@@ -9,7 +9,7 @@ needs to know what a command is. ``AttributeAutoconfigurationPass`` runs them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -20,9 +20,9 @@ __all__ = ["Apply", "Autoconfigurator", "Reader"]
 
 # What a reader finds is only meaningful to the bundle that reads it, so the
 # builder passes it through untyped.
-Reader: TypeAlias = "Callable[[object], Iterable[Any]]"  # pyright: ignore[reportExplicitAny]
+type Reader = "Callable[[object], Iterable[Any]]"  # pyright: ignore[reportExplicitAny]
 # What a reader found, passed through untyped.
-Apply: TypeAlias = "Callable[[object, Any, ServiceConfigurator], None]"  # pyright: ignore[reportExplicitAny]
+type Apply = "Callable[[object, Any, ServiceConfigurator], None]"  # pyright: ignore[reportExplicitAny]
 
 
 @dataclass(frozen=True, slots=True)

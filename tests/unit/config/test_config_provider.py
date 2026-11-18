@@ -160,3 +160,30 @@ def test_a_validation_error_names_the_provider() -> None:
     assert caught.value.__notes__ == [
         f"raised by config provider {__name__}:{provide.__qualname__}"
     ]
+
+
+type SampleAlias = SampleConfig
+type ChainedSample = SampleAlias
+
+
+@configure
+def aliased_base() -> SampleAlias:
+    return SampleConfig(1)
+
+
+@configure
+def aliased_transform(config: ChainedSample) -> SampleAlias:
+    return replace(config, level=config.level + 1)
+
+
+def test_a_provider_returning_an_alias_provides_the_config_it_stands_for() -> None:
+    provider = config_provider_of(aliased_base)
+
+    assert (provider.form, provider.config_type) == ("base", SampleConfig)
+
+
+def test_a_transform_written_with_aliases_takes_the_config_they_stand_for() -> None:
+    provider = config_provider_of(aliased_transform)
+
+    assert (provider.form, provider.config_type) == ("transform", SampleConfig)
+    assert provider.apply(SampleConfig(1)) == SampleConfig(2)

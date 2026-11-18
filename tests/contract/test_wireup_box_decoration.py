@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
-from typing import Literal
+from typing import Literal, override
 
 import pytest
 import wireup
-from typing_extensions import override
 
 from xtr_dependency_injection.compiler._registration import (
     box_type,

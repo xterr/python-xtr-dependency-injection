@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import random
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, cast, final
+from typing import TYPE_CHECKING, cast, final, override
 
 import anyio
 import httpx
 import pytest
 from fastapi import BackgroundTasks, FastAPI, Request, WebSocket
-from typing_extensions import override
 
 from xtr_dependency_injection import Bundle, Injected, Kernel, ServiceConfigurator, as_bundle
 from xtr_dependency_injection.integration.fastapi import attach, current_connection, request_scope
@@ -151,7 +150,7 @@ def _application() -> FastAPI:
 
 
 @asynccontextmanager
-async def _serving(app: FastAPI) -> AsyncGenerator[httpx.AsyncClient, None]:
+async def _serving(app: FastAPI) -> AsyncGenerator[httpx.AsyncClient]:
     """Serve ``app`` and yield a client driving it, one scope per request."""
     transport = httpx.ASGITransport(app=ScopePerRequest(app))
     async with httpx.AsyncClient(transport=transport, base_url="http://served.test") as client:

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeVar
+from typing import TYPE_CHECKING, Annotated, override
 
 import pytest
-from typing_extensions import override
 from wireup import AsyncContainer
 
 from tests.fixtures.app_env import (
@@ -285,13 +284,10 @@ def test_a_placeholder_cannot_decide_structure() -> None:
         _ = kernel.build()
 
 
-_T = TypeVar("_T")
-
-
 class _OtherContainer:
     """A container interface a test puts in place of the kernel's own; it knows no parameter."""
 
-    async def get(self, service: type[_T], /, qualifier: Hashable | None = None) -> _T:
+    async def get[T](self, service: type[T], /, qualifier: Hashable | None = None) -> T:
         del service, qualifier
         raise NotImplementedError
 

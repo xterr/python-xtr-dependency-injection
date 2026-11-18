@@ -48,7 +48,7 @@ def test_an_unmarked_class_is_not_a_decorator() -> None:
 class OptionalTracing:
     def __init__(
         self,
-        # The spelling under test: before Python 3.14 its origin is typing.Union.
+        # The spelling under test: Optional[...], not ``| None``.
         inner: Annotated[Optional[Bus], AutowireDecorated()],  # noqa: UP045  # pyright: ignore[reportDeprecated]
     ) -> None:
         self.inner: Bus | None = inner

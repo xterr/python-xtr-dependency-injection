@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
-
-from typing_extensions import override
+from typing import TYPE_CHECKING, final, override
 
 from .scope_factory_interface import ScopeFactoryInterface
 from .unit_of_work import unit_of_work

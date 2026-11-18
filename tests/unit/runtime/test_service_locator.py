@@ -7,10 +7,9 @@ isinstance and unknown-name errors are container-agnostic.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar, cast, final
+from typing import TYPE_CHECKING, cast, final, override
 
 import pytest
-from typing_extensions import override
 from xtr_service_contracts import (
     ContainerInterface,
     ServiceCollectionInterface,
@@ -25,8 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Hashable
 
 pytestmark = pytest.mark.anyio
-
-T = TypeVar("T")
 
 
 @final
@@ -48,7 +45,7 @@ class FakeContainer(ContainerInterface):
         self._services = services
 
     @override
-    async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
+    async def get[T](self, service: type[T], /, qualifier: Hashable | None = None) -> T:
         return cast("T", self._services[(service, qualifier)])
 
     @override
@@ -88,7 +85,7 @@ async def test_only_the_service_asked_for_is_built() -> None:
 
     class CountingContainer(FakeContainer):
         @override
-        async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
+        async def get[T](self, service: type[T], /, qualifier: Hashable | None = None) -> T:
             calls.append(str(qualifier))
             return await super().get(service, qualifier)
 
@@ -134,7 +131,7 @@ async def test_aiter_yields_pairs_in_entry_order_and_lazily() -> None:
 
     class CountingContainer(FakeContainer):
         @override
-        async def get(self, service: type[T], /, qualifier: Hashable | None = None) -> T:
+        async def get[T](self, service: type[T], /, qualifier: Hashable | None = None) -> T:
             calls.append(qualifier)
             return await super().get(service, qualifier)
 

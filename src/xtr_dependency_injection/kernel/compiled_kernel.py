@@ -117,7 +117,7 @@ class CompiledKernel:
         return self._lifespan()
 
     @asynccontextmanager
-    async def _lifespan(self) -> AsyncGenerator[None, None]:
+    async def _lifespan(self) -> AsyncGenerator[None]:
         booted = await self.boot()
         try:
             yield

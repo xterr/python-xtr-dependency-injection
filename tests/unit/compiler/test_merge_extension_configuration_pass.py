@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
-from typing_extensions import override
 
 from tests.support.bundles import EchoBundle, EchoConfig
 from xtr_dependency_injection.builder import Origin

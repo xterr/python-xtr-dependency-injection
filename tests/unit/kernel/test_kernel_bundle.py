@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import ModuleType
-from typing import cast, final
+from typing import cast, final, override
 
 import pytest
-from typing_extensions import override
 
 from tests.support.bundles import EchoBundle, EchoConfig
 from xtr_dependency_injection import Bundle, as_bundle

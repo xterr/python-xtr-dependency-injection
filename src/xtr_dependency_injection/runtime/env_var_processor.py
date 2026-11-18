@@ -55,10 +55,8 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, cast, final
+from typing import TYPE_CHECKING, Final, cast, final, override
 from urllib.parse import parse_qs, quote, unquote, urlsplit
-
-from typing_extensions import override
 
 from xtr_dependency_injection.exception import (
     EnvPlaceholderError,
@@ -352,7 +350,7 @@ class EnvVarProcessor(EnvVarProcessorInterface):
         """
         try:
             return Path(str(env)).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             # ``from None``: the underlying error quotes the path — which is
             # the variable's value, and may be a secret; the typed error keeps
             # it in ``value``, off the message.
