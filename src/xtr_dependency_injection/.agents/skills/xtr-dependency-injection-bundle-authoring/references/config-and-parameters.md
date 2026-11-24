@@ -58,12 +58,15 @@ A bundle adds parameters from `build`:
 They merge into nested mappings and never override: a leaf set twice is a
 `ParameterConflictError` naming both sources. The kernel provides `kernel.name`, `kernel.package`,
 `kernel.environment`, `kernel.debug`, `kernel.project_dir`, `kernel.share_dir`,
-`kernel.cache_dir` (`var/cache/<environment>`), `kernel.build_dir` (the same directory) and
-`kernel.bundles`.
+`kernel.cache_dir` (`var/cache/<environment>`), `kernel.build_dir` (the same directory),
+`kernel.log_dir` (`var/log`) and `kernel.bundles`.
 
 `kernel.share_dir` is `var/share` in the project directory, owned by whoever owns the project.
 Write there for anything the application's processes share on one machine, never into the
 system's temporary directory. Create nothing until something actually writes.
+
+`kernel.log_dir` is `var/log` in the project directory, shared across environments — logs are
+not scoped to one the way the cache is. Create nothing until something actually writes.
 
 A service reads a parameter with `Annotated[str, Autowire(param="mail.spool_dir")]`; the bundle
 reads one while building with `builder.get_parameter(name)`. A string anywhere in a config or a

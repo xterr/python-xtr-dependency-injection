@@ -82,6 +82,7 @@ from .booted_kernel import BootedKernel, call_injected
 from .cache_dir import cache_dir
 from .compiled_kernel import CompiledKernel
 from .kernel_bundle import KernelBundle
+from .log_dir import log_dir
 from .share_dir import share_dir
 
 if TYPE_CHECKING:
@@ -759,7 +760,8 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
 
     The kernel exposes ``kernel.name``, ``kernel.package``, ``kernel.environment``,
     ``kernel.debug``, ``kernel.project_dir``, ``kernel.share_dir``,
-    ``kernel.cache_dir``, ``kernel.build_dir`` and ``kernel.bundles``
+    ``kernel.cache_dir``, ``kernel.build_dir``, ``kernel.log_dir`` and
+    ``kernel.bundles``
     (name → class) from the very beginning of the container build; every
     bundle's hook may read them. ``kernel.build_dir``, where what is only ever
     read goes, is the cache directory itself.
@@ -778,6 +780,7 @@ def _register_kernel_parameters(  # noqa: PLR0913 — the kernel identity is a f
                 "share_dir": str(share_dir(project_dir)),
                 "cache_dir": environment_cache,
                 "build_dir": environment_cache,
+                "log_dir": str(log_dir(project_dir)),
                 "bundles": bundles_map,
             }
         },

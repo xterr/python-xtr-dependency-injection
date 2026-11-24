@@ -427,7 +427,8 @@ class MailConfig:
 
 **Parameters** are values injected with `Annotated[str, Autowire(param="...")]`. The kernel
 provides `kernel.name`, `kernel.package`, `kernel.environment`, `kernel.debug`, `kernel.project_dir`,
-`kernel.share_dir`, `kernel.cache_dir`, `kernel.build_dir` and `kernel.bundles` (a mapping of
+`kernel.share_dir`, `kernel.cache_dir`, `kernel.build_dir`, `kernel.log_dir` and `kernel.bundles`
+(a mapping of
 bundle name to `module:Class`); bundles
 add theirs with
 `builder.set_parameter(name, value)`, the application with `@parameters`. They merge into
@@ -444,6 +445,10 @@ something writes there.
 directory, one per environment, everything in it rebuildable. `kernel.build_dir` is where what
 is only ever read goes; it is the cache directory itself. Neither is created until something
 writes there — see [Cache warmers and clearers](#cache-warmers-and-clearers).
+
+`kernel.log_dir` is where the project's processes write logs: `var/log` in the project
+directory. Logs are shared across environments, so unlike the cache it is not scoped to one.
+Nothing is created until something writes there.
 
 ```python
 from typing import Annotated

@@ -68,6 +68,8 @@ def test_the_kernel_registers_the_kernel_parameters() -> None:
 
     assert compiled.container.get_parameter("kernel.name") == "shop"
     assert compiled.container.get_parameter("kernel.environment") == "dev"
+    project_dir = Path(str(compiled.container.get_parameter("kernel.project_dir")))
+    assert compiled.container.get_parameter("kernel.log_dir") == str(project_dir / "var" / "log")
     bundles_param = compiled.container.get_parameter("kernel.bundles")
     assert isinstance(bundles_param, dict)
     keys = cast("dict[object, object]", bundles_param).keys()

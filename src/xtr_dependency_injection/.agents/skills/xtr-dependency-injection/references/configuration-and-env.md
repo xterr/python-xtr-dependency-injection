@@ -54,7 +54,7 @@ environment.
 
 Named values injected by key. The kernel provides `kernel.name`, `kernel.package`, `kernel.environment`,
 `kernel.debug`, `kernel.project_dir`, `kernel.share_dir`, `kernel.cache_dir`,
-`kernel.build_dir` and `kernel.bundles`; bundles add
+`kernel.build_dir`, `kernel.log_dir` and `kernel.bundles`; bundles add
 theirs; the application adds its own:
 
 ```python
@@ -87,6 +87,8 @@ class Site:
   share files. Keep `var/` out of version control.
 - `kernel.cache_dir` (`var/cache/<environment>` under the project) is the environment's
   rebuildable cache; `kernel.build_dir`, for what is only ever read, is the same directory.
+- `kernel.log_dir` (`var/log` under the project) is where the processes write logs; it is
+  shared across environments, not scoped to one.
 - At runtime a service reads the compiled parameters by injecting `ContainerBagInterface`.
 
 ### `%name%` references
