@@ -19,7 +19,6 @@ from __future__ import annotations
 import importlib
 import importlib.abc
 import importlib.machinery
-import inspect
 import sys
 from collections.abc import Mapping
 from types import ModuleType
@@ -28,6 +27,7 @@ from typing import TYPE_CHECKING, Final, cast, final, override
 from xtr_dependency_injection.bundle._absent_bundle import AbsentBundle
 from xtr_dependency_injection.bundle.bundle import AnyBundle, Bundle
 from xtr_dependency_injection.exception import BundleDefinitionError, ResourceImportError
+from xtr_dependency_injection.scan._frames import running_module
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -182,7 +182,7 @@ class _StandInFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         parent = fullname.rpartition(".")[0]
         if parent and parent not in self.stood_in:
             return None
-        if not _imported_by(self._bundles_module):
+        if running_module() != self._bundles_module:
             return None
         return importlib.machinery.ModuleSpec(fullname, self, is_package=True)
 
@@ -219,17 +219,3 @@ class _StandInModule(ModuleType):
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         return self._absent.setdefault(name, AbsentBundle(self.__name__, name))
-
-
-def _imported_by(module_name: str) -> bool:
-    """Whether the import being looked up is one ``module_name``'s own code makes.
-
-    A finder is not told who imports, so the stack says: the innermost module
-    body on it belongs to the module whose import is running, and every frame
-    nearer is the import system's, an import hook's, or a function that module
-    called.
-    """
-    frame = inspect.currentframe()
-    while frame is not None and frame.f_code.co_name != "<module>":
-        frame = frame.f_back
-    return frame is not None and frame.f_globals.get("__name__") == module_name

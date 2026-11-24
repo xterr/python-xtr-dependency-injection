@@ -6,7 +6,8 @@ order within one priority — so a built-in pass runs before a pass added later
 at its priority. The defaults, by stage and priority:
 
 - ``BEFORE_OPTIMIZATION`` 100: :class:`RegisterAutoconfigureAttributesPass`,
-  :class:`AutowireAsDecoratorPass`, :class:`AttributeAutoconfigurationPass`,
+  :class:`AutowireAsDecoratorPass`, :class:`CheckSetAsideCandidatesPass`,
+  :class:`AttributeAutoconfigurationPass`,
   :class:`ResolveInstanceofConditionalsPass`,
   :class:`RegisterEnvVarProcessorsPass`,
   :class:`RemoveMissingDependenciesPass`;
@@ -31,6 +32,7 @@ from xtr_dependency_injection.exception import InvalidArgumentTypeError
 from .attribute_autoconfiguration_pass import AttributeAutoconfigurationPass
 from .autowire_as_decorator_pass import AutowireAsDecoratorPass
 from .check_definition_validity_pass import CheckDefinitionValidityPass
+from .check_set_aside_candidates_pass import CheckSetAsideCandidatesPass
 from .compiler_pass_interface import CompilerPassInterface
 from .decorator_service_pass import DecoratorServicePass
 from .pass_stage import PassStage
@@ -64,6 +66,7 @@ class PassConfig:
         self._passes[PassStage.BEFORE_OPTIMIZATION][100] = [
             RegisterAutoconfigureAttributesPass(),
             AutowireAsDecoratorPass(),
+            CheckSetAsideCandidatesPass(),
             AttributeAutoconfigurationPass(),
             ResolveInstanceofConditionalsPass(),
             RegisterEnvVarProcessorsPass(),

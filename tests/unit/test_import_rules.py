@@ -60,6 +60,7 @@ _PASS_MODULE_IMPORTS: dict[str, set[str]] = {
         "config.env_placeholder",
         "exception",
     },
+    "check_set_aside_candidates_pass": {"exception"},
     "register_env_var_processors_pass": {"builder.definition", "exception", "runtime"},
     "validate_env_placeholders_pass": {"config.env_placeholder", "exception"},
     "resolve_parameter_placeholders_pass": set(),

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import logging
 import os
 import warnings
 from collections.abc import Callable, Mapping
@@ -55,7 +56,12 @@ from xtr_dependency_injection.config.parameters import call_parameters, merge_pa
 from xtr_dependency_injection.decorator.compiler_pass import compiler_pass_of
 from xtr_dependency_injection.decorator.lifecycle import on_boot_of, on_shutdown_of
 from xtr_dependency_injection.diagnostics import DefinitionReport
-from xtr_dependency_injection.diagnostics.report import KernelReport, ReportBuilder
+from xtr_dependency_injection.diagnostics.report import (
+    BundleReport,
+    KernelReport,
+    ReportBuilder,
+    SetAsideReport,
+)
 from xtr_dependency_injection.exception import (
     InvalidArgumentError,
     InvalidArgumentTypeError,
@@ -103,6 +109,8 @@ _DEBUG_DEFAULT_WARNED: set[str] = set()
 # Module-level because the property may be read more than once and the kernel
 # has no private environ to mark: this keeps the migration warning to one per
 # environment name, per process.
+
+_LOGGER: Final = logging.getLogger("xtr_dependency_injection")
 
 
 @final
@@ -398,19 +406,37 @@ def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     allowed_envs: Sequence[str] | None = None,
     given: Sequence[object] = (),
     environ: Mapping[str, str] | None = None,
+    inactive_packages: Sequence[str] = (),
+    application_exclude: Sequence[str] = (),
+    sets_aside: bool = False,
 ) -> Assembly:
     """Run steps 3 to 5 for ``bundles``, recording into ``report``.
 
     Shared by :func:`prepare`, which computes ``active`` once for both the
-    report and this call.
+    report and this call; ``sets_aside`` — whether a listed bundle is not
+    active — with which the application scan sets aside a module needing a
+    package that is not installed; ``inactive_packages`` — the packages of
+    those bundles — which make such a module expected; and
+    ``application_exclude`` — the resources of those bundles — which the
+    application scan leaves out.
     """
-    scanner = Scanner(env=environment, exclude=exclude, package=package, allowed_envs=allowed_envs)
+    scanner = Scanner(
+        env=environment,
+        exclude=exclude,
+        package=package,
+        allowed_envs=allowed_envs,
+        inactive_packages=inactive_packages,
+        application_exclude=application_exclude,
+        sets_aside=sets_aside,
+    )
     early = _early_scan(scanner, resources, bundles)
     state = BuildState(
         env=environment, debug=debug, bundles=tuple(active), configs={}, environ=environ
     )
     state.candidates.extend(early.services)
     state.scanned_decorators.extend(early.decorators)
+    state.set_aside.extend(early.set_aside)
+    state.set_aside_modules.update((entry.module, entry) for entry in scanner.set_aside)
     _register_kernel_parameters(
         state,
         name=name,
@@ -438,6 +464,7 @@ def assemble(  # noqa: PLR0913 — steps 3 to 5 need all of these.
     late = merge.late
     report.modules.extend(scanner.modules)
     report.skipped.extend(scanner.skipped)
+    report.set_aside.extend(scanner.set_aside)
     return Assembly(
         state=state,
         decorations=state.decorations,
@@ -508,6 +535,7 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
     core.info.activate(active)
     report.bundles.extend(resolved.reports)
     inactive_config_owners = _inactive_config_owners(listed, active)
+    inactive_listed = _inactive_listed(resolved.reports)
     assembly = assemble(
         name=name,
         package=package,
@@ -523,7 +551,11 @@ def prepare(  # noqa: PLR0913 — each input is a separate build decision.
         allowed_envs=allowed_envs,
         given=given,
         environ=environ,
+        inactive_packages=_inactive_packages(inactive_listed, listed, package),
+        application_exclude=_inactive_resources(listed, active),
+        sets_aside=bool(inactive_listed),
     )
+    _log_set_aside(report.set_aside)
     ordered = emission_order(assembly.state.store.entries(), assembly.state.forwards)
     injectables = emit_injectables(
         ordered,
@@ -557,13 +589,130 @@ def _check_environment(environment: str, allowed: Sequence[str] | None) -> None:
 def _early_scan(
     scanner: Scanner, resources: Sequence[str | ModuleType], bundles: Sequence[AnyBundle]
 ) -> ScanResult:
-    """Step 3: the application's resources, then each active bundle's."""
+    """Step 3: the application's resources, then each active bundle's.
+
+    The application's scan leaves out the resources of every listed bundle
+    that is not active (see :func:`_inactive_resources`). Where a bundle is
+    active, what the application scan already found is never found twice.
+    """
     merged = scanner.scan(resources, owner=None)
     for bundle in bundles:
         metadata = type(bundle).metadata()
         if metadata.resources:
             merged.extend(scanner.scan(metadata.resources, owner=metadata.name))
     return merged
+
+
+def _inactive_resources(listed: ListedBundles, active: Sequence[str]) -> tuple[str, ...]:
+    """Return the resources of each listed bundle not active, for the application scan to skip.
+
+    A bundle active only for development keeps the modules it declares — and
+    whatever they import — out of every other environment: a resource inside
+    the application package is not imported by the application's own scan
+    where its bundle does not run. Where it runs, the application scan walks
+    it as ever. A bundle whose package is not installed declares nothing.
+    """
+    names = dict.fromkeys(
+        resource
+        for entry in listed
+        if not isinstance(entry, AbsentBundle) and entry.metadata().name not in active
+        for resource in entry.metadata().resources
+    )
+    return tuple(names)
+
+
+def _inactive_listed(reports: Sequence[BundleReport]) -> list[BundleReport]:
+    """Return the report of each bundle the application lists that is not active here."""
+    return [report for report in reports if report.source == "listed" and report.state != "active"]
+
+
+def _inactive_packages(
+    reports: Sequence[BundleReport], listed: ListedBundles, application: str
+) -> tuple[str, ...]:
+    """Return the package of each listed bundle that is not active, sorted.
+
+    The bundle list says which bundles each environment runs. Where one does
+    not run — disabled here, or not installed — what only it uses, its own
+    package or a development library its environments need, may be missing
+    from the installation, so the application scan sets aside a module needing
+    what is not installed. Where every listed bundle runs, nothing is expected
+    to be missing, and the tuple is empty.
+
+    A bundle's package is its top-level one — that of its distribution — or,
+    sharing a namespace with the application, the first package of its path
+    the application is not in. A bundle the application defines itself owns
+    its own module and the resources it declares — never the whole
+    application, nor a folder other bundles share.
+    """
+    classes = {
+        qualified_name(entry): entry for entry in listed if not isinstance(entry, AbsentBundle)
+    }
+    packages: set[str] = set()
+    for report in _inactive_listed(reports):
+        module = report.qualname.partition(":")[0]
+        if not application or (module != application and not module.startswith(f"{application}.")):
+            package = _own_package(module, application)
+            # A bundle in a namespace the application shares: never the application's own path.
+            if not _holds(package, application):
+                packages.add(package)
+            continue
+        if module != application:
+            packages.add(module)
+        # A bundle of the application is installed with it: its class is in the list.
+        packages.update(classes[report.qualname].metadata().resources)
+    return tuple(sorted(packages))
+
+
+def _own_package(module: str, application: str) -> str:
+    """Return the first package of ``module``'s path that holds no part of ``application``."""
+    parts = module.split(".")
+    package = parts[0]
+    for part in parts[1:]:
+        if not _holds(package, application):
+            break
+        package = f"{package}.{part}"
+    return package
+
+
+def _holds(package: str, application: str) -> bool:
+    """Whether ``package`` is ``application``, or a package ``application`` lies in."""
+    return bool(application) and (application == package or application.startswith(f"{package}."))
+
+
+def _log_set_aside(set_aside: Sequence[SetAsideReport]) -> None:
+    """Say, once per build, what the scan set aside — and warn of what no inactive bundle explains.
+
+    A module that needs, or reaches, the package of a listed bundle that is
+    not active is set aside as expected. One that does not may be just as
+    expected — a helper using a development library alone — or need a
+    dependency missing from the installation, or carry a mistyped import:
+    the warning names it, and an environment where every listed bundle runs
+    refuses it outright.
+    """
+    if not set_aside:
+        return
+    needed = sorted({package for entry in set_aside for package in entry.missing})
+    _LOGGER.info(
+        (
+            "Set aside %d module(s) needing packages that are not installed (%s); nothing they "
+            "define is registered. The kernel report's scan section lists them."
+        ),
+        len(set_aside),
+        ", ".join(needed),
+    )
+    unexplained = [entry for entry in set_aside if not entry.expected]
+    if unexplained:
+        modules = ", ".join(
+            f"{entry.module} (needs {', '.join(entry.missing)})" for entry in unexplained
+        )
+        _LOGGER.warning(
+            (
+                "Set aside %s, reaching no package of a listed bundle inactive here: expected "
+                "of a helper using a development library alone, but a dependency missing "
+                "from this installation, or a mistyped import, looks the same."
+            ),
+            modules,
+        )
 
 
 def _prepare_container(

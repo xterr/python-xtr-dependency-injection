@@ -34,6 +34,9 @@ if TYPE_CHECKING:
     from xtr_dependency_injection.compiler.wireup_compiler import (
         Decoration,  # noqa: TC004 — see above.
     )
+    from xtr_dependency_injection.diagnostics.report import (
+        SetAsideReport,  # noqa: TC004 — see above.
+    )
     from xtr_dependency_injection.scan.scanned_object import (
         ScannedObject,  # noqa: TC004 — see above.
     )
@@ -102,6 +105,9 @@ class BuildState:
             and its log what the passes reported.
         candidates: Every service candidate the scans found, which the
             autoconfiguration passes look at.
+        set_aside: Every function and class of a module the scan set aside,
+            which ``CheckSetAsideCandidatesPass`` refuses to see claimed.
+        set_aside_modules: Why each set-aside module was set aside, by name.
         scanned_decorators: Every scanned ``@as_decorator`` class or factory.
         environ: Where the environment variable processors read variables;
             ``None`` reads the live process environment.
@@ -129,6 +135,8 @@ class BuildState:
     forwards: dict[ServiceKey, ServiceKey] = field(default_factory=dict)
     compiler: Compiler = field(default_factory=Compiler)
     candidates: list[ScannedObject] = field(default_factory=list)
+    set_aside: list[ScannedObject] = field(default_factory=list)
+    set_aside_modules: dict[str, SetAsideReport] = field(default_factory=dict)
     scanned_decorators: list[ScannedObject] = field(default_factory=list)
     environ: Mapping[str, str] | None = None
 

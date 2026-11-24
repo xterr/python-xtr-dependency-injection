@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from tests.fixtures.app_scan import hooks, services
@@ -7,6 +9,9 @@ from xtr_dependency_injection.exception import ConfigProviderError, ResourceImpo
 from xtr_dependency_injection.scan import DEFAULT_EXCLUDES
 from xtr_dependency_injection.scan.scanned_object import ScannedObject
 from xtr_dependency_injection.scan.scanner import Scanner, ScanResult
+
+if TYPE_CHECKING:
+    from tests.support.modules import ScratchModules
 
 APP = "tests.fixtures.app_scan"
 
@@ -162,3 +167,21 @@ def test_a_module_object_is_accepted_as_a_resource() -> None:
     result = scanner.scan([services], owner=None)
 
     assert services.Plain in [scanned.obj for scanned in result.services]
+
+
+LAZY = "def __getattr__(name):\n    return 1\n\n\nclass Lazy:\n    pass\n"
+
+
+@pytest.mark.parametrize("inactive", [(), ("acme_tools",)], ids=["strict", "setting-aside"])
+def test_a_module_answering_every_name_is_not_taken_for_a_package(
+    scratch_modules: ScratchModules, inactive: tuple[str, ...]
+) -> None:
+    scratch_modules.write({"acme_app.lazy": LAZY, "acme_app.pkg.child": "class Child:\n    pass\n"})
+    scanner = Scanner(
+        env="dev", exclude=DEFAULT_EXCLUDES, package="acme_app", inactive_packages=inactive
+    )
+
+    result = scanner.scan(["acme_app"], owner=None)
+
+    assert scanner.modules == ["acme_app", "acme_app.lazy", "acme_app.pkg", "acme_app.pkg.child"]
+    assert "acme_app.lazy:Lazy" in [scanned.name for scanned in result.services]

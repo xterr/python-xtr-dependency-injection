@@ -29,6 +29,7 @@ from xtr_dependency_injection.exception import (
     ServiceCircularReferenceError,
     ServiceNotFoundError,
     ServiceResolutionError,
+    SetAsideModuleUsedError,
     UnknownConfigTypeError,
     UnknownEnvironmentFolderError,
     UnknownLocatorKeyError,
@@ -104,6 +105,37 @@ def test_resource_import_error_names_the_module() -> None:
 
     assert error.module == "app.broken"
     assert str(error) == "cannot import scanned module 'app.broken'"
+
+
+def test_set_aside_module_used_error_names_the_object_its_use_and_the_packages() -> None:
+    error = SetAsideModuleUsedError(
+        "app.seed:Seed", "@as_service", module="app.seed", missing=("faker",)
+    )
+
+    assert (error.name, error.use, error.module, error.missing, error.through) == (
+        "app.seed:Seed",
+        "@as_service",
+        "app.seed",
+        ("faker",),
+        None,
+    )
+    assert str(error) == (
+        "app.seed:Seed is used (@as_service), but its module 'app.seed' was set aside: it needs "
+        "'faker', not installed here. Install what provides 'faker', or stop importing it from "
+        "'app.seed'."
+    )
+
+
+def test_set_aside_module_used_error_names_the_module_it_needs_them_through() -> None:
+    error = SetAsideModuleUsedError(
+        "app.report:Report",
+        "bundle 'console' would register it",
+        module="app.report",
+        missing=("faker", "tools"),
+        through="app.seed",
+    )
+
+    assert "it imports 'app.seed', which needs 'faker', 'tools', not installed here" in str(error)
 
 
 def test_config_provider_error_carries_the_provider_and_reason() -> None:

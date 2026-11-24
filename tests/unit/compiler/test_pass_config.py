@@ -40,6 +40,7 @@ def test_the_built_in_passes_are_in_place() -> None:
     assert _names(config.get_before_optimization_passes()) == [
         "RegisterAutoconfigureAttributesPass",
         "AutowireAsDecoratorPass",
+        "CheckSetAsideCandidatesPass",
         "AttributeAutoconfigurationPass",
         "ResolveInstanceofConditionalsPass",
         "RegisterEnvVarProcessorsPass",

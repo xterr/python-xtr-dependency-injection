@@ -24,6 +24,7 @@ __all__ = [
     "KernelReport",
     "ReportBuilder",
     "ScanReport",
+    "SetAsideReport",
 ]
 
 Section = Literal["bundles", "configs", "definitions", "scan"]
@@ -100,16 +101,43 @@ class DefinitionReport:
 
 
 @dataclass(frozen=True, slots=True)
+class SetAsideReport:
+    """A module the scan set aside, because a package it needs is not installed.
+
+    Attributes:
+        module: The module's name.
+        missing: The top-level packages it needs, directly or through
+            another module, that are not installed.
+        through: The set-aside module it needs them through, or ``None``
+            when it imports one of them itself.
+        defines: ``module:qualname`` of each function and class it defines,
+            none of which became anything.
+        expected: Whether it needs, or reaches, the package of a listed
+            bundle that is not active — what such a bundle's absence
+            explains; one that does not may need a dependency missing from
+            the installation, or a mistyped import.
+    """
+
+    module: str
+    missing: tuple[str, ...]
+    through: str | None = None
+    defines: tuple[str, ...] = ()
+    expected: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ScanReport:
-    """The modules scanned, and every object an environment condition dropped.
+    """The modules scanned, every object an environment condition dropped, and what was set aside.
 
     Attributes:
         modules: Every module imported by the scan, in import order.
         skipped: ``(qualname, reason)`` for each object left out.
+        set_aside: Every module set aside, in the order found.
     """
 
     modules: tuple[str, ...] = ()
     skipped: tuple[tuple[str, str], ...] = ()
+    set_aside: tuple[SetAsideReport, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +219,20 @@ class KernelReport:
     def _scan(self) -> str:
         modules = _table(("Module",), [(module,) for module in self.scan.modules])
         skipped = _table(("Skipped", "Reason"), list(self.scan.skipped))
-        return _titled("Scan", f"{modules}\n\n{skipped}")
+        set_aside = _table(
+            ("Set aside", "Needs", "Through", "Expected", "Defines"),
+            [
+                (
+                    entry.module,
+                    ", ".join(entry.missing),
+                    entry.through or "-",
+                    "yes" if entry.expected else "no",
+                    ", ".join(entry.defines) or "-",
+                )
+                for entry in self.scan.set_aside
+            ],
+        )
+        return _titled("Scan", f"{modules}\n\n{skipped}\n\n{set_aside}")
 
 
 @dataclass(slots=True)
@@ -203,6 +244,7 @@ class ReportBuilder:
     definitions: list[DefinitionReport] = field(default_factory=list)
     modules: list[str] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
+    set_aside: list[SetAsideReport] = field(default_factory=list)
 
     def freeze(self) -> KernelReport:
         """Return what was collected as an immutable report."""
@@ -210,7 +252,11 @@ class ReportBuilder:
             bundles=tuple(self.bundles),
             configs=tuple(self.configs),
             definitions=tuple(self.definitions),
-            scan=ScanReport(modules=tuple(self.modules), skipped=tuple(self.skipped)),
+            scan=ScanReport(
+                modules=tuple(self.modules),
+                skipped=tuple(self.skipped),
+                set_aside=tuple(self.set_aside),
+            ),
         )
 
 

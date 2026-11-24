@@ -69,6 +69,16 @@ once).
 `.` is relative to the package, and `default_excludes=False` drops the defaults. Other
 arguments: `name`, `bundles`, `resources`, `environ`, `allowed_envs`.
 
+A package inside the application that a listed bundle names in its `resources` is left out of
+the application's scan wherever that bundle is not active, so it needs no `exclude`; where the
+bundle is active, the application's scan walks it as any other. Where a listed bundle is not
+active — disabled for the environment, or not installed, as in a deployment without development
+dependencies — a module needing a package that is not installed (a fixtures bundle, a fake-data
+library) is
+**set aside**: nothing it defines is registered, the scan report lists it, and
+`SetAsideModuleUsedError` fails the build if anything would use it. Where every listed bundle is
+active, nothing is set aside. See the README's *Development-only packages*.
+
 A subpackage of `app/config/packages/` or `app/config/routes/` is an **environment folder**:
 imported only in the environment it is named after, after every common module, so its
 `@configure` functions win over the common ones. Configure a bundle listed for `dev` only in
@@ -294,6 +304,7 @@ Every error derives from `DependencyInjectionError`. The ones an application mee
 | `EnvPlaceholderError` | A placeholder used as a real value while building — typically `if env(...)` |
 | `InvalidEnvironmentError` | `APP_ENV` is outside `allowed_envs` |
 | `UnknownEnvironmentFolderError` | A folder in `config/packages/` or `config/routes/` is not named after an allowed environment — rename it, or move its modules up |
+| `SetAsideModuleUsedError` | A module needing a package this deployment did not install defines something used — a service, a hook, a class an active bundle registers: install the package, or stop importing it from that module |
 
 The full list, and what each diagnostic command prints:
 [references/diagnostics-and-errors.md](references/diagnostics-and-errors.md).

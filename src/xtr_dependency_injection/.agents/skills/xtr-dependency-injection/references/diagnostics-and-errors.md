@@ -19,7 +19,7 @@ With the console bundle active the same sections are commands:
 
 | Command | Answers |
 | --- | --- |
-| `debug:bundles` | Which bundles are active and why — `listed`, `required`, skipped — and which installed ones the application left out |
+| `debug:bundles` | Which bundles are active and why — `listed`, `required`, skipped — which installed ones the application left out, and which application modules were set aside for a package not installed |
 | `debug:config [bundle]` | Each config's resolution steps and final value; placeholders print as `env(NAME)` |
 | `debug:container [--tag TAG]` | Every definition, in emission order |
 
@@ -66,7 +66,8 @@ Every error derives from `DependencyInjectionError` and carries its data as type
 | `CircularBundleDependencyError` | Bundle requirements loop, or an `AliasOf` forward does |
 | `InvalidEnvironmentError` | The environment is not in `allowed_envs` |
 | `UnknownEnvironmentFolderError` | A folder under `config/packages/` or `config/routes/` is named after no environment in `allowed_envs` |
-| `ResourceImportError` | A scanned module failed to import |
+| `ResourceImportError` | A scanned module failed to import — where a listed bundle is not active, other than for a package that is not installed, or still when imported again with it stood in for |
+| `SetAsideModuleUsedError` | An object of a set-aside module would be used: a marker of the container on it, or an active bundle's autoconfiguration registering it |
 | `BundleDefinitionError` | A malformed bundle declaration or `"module:Class"` target |
 
 ### Configuration and parameters

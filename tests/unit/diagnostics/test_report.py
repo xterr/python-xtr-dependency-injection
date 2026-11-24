@@ -9,6 +9,7 @@ from xtr_dependency_injection.diagnostics import (
     DefinitionReport,
     KernelReport,
     ScanReport,
+    SetAsideReport,
 )
 from xtr_dependency_injection.diagnostics.report import ReportBuilder
 
@@ -117,3 +118,30 @@ def test_the_builder_freezes_what_it_collected() -> None:
     report = builder.freeze()
 
     assert report.scan == ScanReport(("app",), (("app:x", "why"),))
+
+
+def test_the_builder_freezes_what_was_set_aside() -> None:
+    builder = ReportBuilder()
+    builder.set_aside.append(SetAsideReport("app.seed", ("faker",)))
+
+    report = builder.freeze()
+
+    assert report.scan.set_aside == (SetAsideReport("app.seed", ("faker",)),)
+
+
+def test_the_scan_section_lists_what_was_set_aside() -> None:
+    report = KernelReport(
+        scan=ScanReport(
+            set_aside=(
+                SetAsideReport(
+                    "app.seed", ("faker", "tools"), defines=("app.seed:Seed",), expected=True
+                ),
+                SetAsideReport("app.uses_seed", ("faker", "tools"), through="app.seed"),
+            )
+        )
+    )
+
+    rendered = report.render("scan")
+
+    assert "app.seed       faker, tools  -         yes       app.seed:Seed" in rendered
+    assert "app.uses_seed  faker, tools  app.seed  no        -" in rendered

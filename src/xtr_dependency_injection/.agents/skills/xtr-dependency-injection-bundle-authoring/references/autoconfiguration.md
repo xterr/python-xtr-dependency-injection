@@ -84,8 +84,11 @@ RECEIVER_TAG: Final = "messenger.receiver"
 
 ## Scanning only when a peer is active
 
-`resources=` on `@as_bundle` is scanned whenever the bundle is active. For a module that should
-only be scanned when a peer is there, scan it late from `load_extension`:
+`resources=` on `@as_bundle` is scanned whenever the bundle is active, and only then. A resource
+inside the application package is also left out of the application's scan where the application
+lists the bundle and it is not active; where it is active, the application's scan walks it too,
+and what it defines there is the application's. For a module that should only be scanned when a
+peer is there, scan it late from `load_extension`:
 
 ```python
         if bundle_active(builder, "console"):
@@ -94,6 +97,21 @@ only be scanned when a peer is there, scan it late from `load_extension`:
 
 A late scan runs after every bundle loaded, so it may not declare `@configure`, `@parameters` or
 `@compiler_pass`: each of those is needed before bundles load. Put them in `resources`.
+
+## Set-aside modules
+
+Where a listed bundle is not active, the application's scan sets aside a module needing a
+package that is not installed, and nothing it defines becomes a candidate. Your
+reader is still asked about each set-aside class and function the environment keeps (`@exclude`
+and a `@when` leaving it out are honoured first), just before the candidates — and, for one under
+a stand-in decorator, about the stand-in the module holds in its place. One it finds something
+on fails the build with `SetAsideModuleUsedError`, since it would have been registered. A reader
+must therefore cope with a class whose base stands in for a missing class — a plain class
+carrying no attribute of yours — and with a stand-in, and find nothing on either.
+
+Finding classes any other way — `Base.__subclasses__()`, a registry your base class fills from
+`__init_subclass__` — also finds a set-aside class: its module ran once, to be inspected. Find
+them through a reader instead, which the build keeps honest.
 
 ## Tag ordering
 

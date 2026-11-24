@@ -54,6 +54,7 @@ order.
 | --- | --- | --- | --- |
 | `BEFORE_OPTIMIZATION` | 100 | `RegisterAutoconfigureAttributesPass` | Turns `@autoconfigure` / `@autoconfigure_tag` markers into rules |
 | | 100 | `AutowireAsDecoratorPass` | Turns scanned `@as_decorator` classes into decorating definitions |
+| | 100 | `CheckSetAsideCandidatesPass` | Refuses a set-aside class or function an autoconfiguration reader would register |
 | | 100 | `AttributeAutoconfigurationPass` | Runs `register_attribute_for_autoconfiguration` callbacks |
 | | 100 | `ResolveInstanceofConditionalsPass` | Applies the autoconfiguration rules |
 | | 100 | `RegisterEnvVarProcessorsPass` | Registers the environment variable processors and loaders |

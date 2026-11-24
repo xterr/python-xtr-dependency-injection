@@ -42,6 +42,7 @@ from .service_circular_reference_error import ServiceCircularReferenceError
 from .service_not_found_error import ServiceNotFoundError
 from .service_order_error import ServiceOrderError
 from .service_resolution_error import ServiceResolutionError
+from .set_aside_module_used_error import SetAsideModuleUsedError
 from .unit_of_work_closed_error import UnitOfWorkClosedError
 from .unit_read_during_singleton_build_error import UnitReadDuringSingletonBuildError
 from .unknown_config_type_error import UnknownConfigTypeError
@@ -84,6 +85,7 @@ __all__ = [
     "ServiceNotFoundError",
     "ServiceOrderError",
     "ServiceResolutionError",
+    "SetAsideModuleUsedError",
     "UnitOfWorkClosedError",
     "UnitReadDuringSingletonBuildError",
     "UnknownConfigTypeError",

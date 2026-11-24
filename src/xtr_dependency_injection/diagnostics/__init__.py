@@ -2,6 +2,20 @@
 
 from __future__ import annotations
 
-from .report import BundleReport, ConfigReport, DefinitionReport, KernelReport, ScanReport
+from .report import (
+    BundleReport,
+    ConfigReport,
+    DefinitionReport,
+    KernelReport,
+    ScanReport,
+    SetAsideReport,
+)
 
-__all__ = ["BundleReport", "ConfigReport", "DefinitionReport", "KernelReport", "ScanReport"]
+__all__ = [
+    "BundleReport",
+    "ConfigReport",
+    "DefinitionReport",
+    "KernelReport",
+    "ScanReport",
+    "SetAsideReport",
+]
