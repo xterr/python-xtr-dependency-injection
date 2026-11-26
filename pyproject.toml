@@ -18,7 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "wireup>=2.12,<3",
-    "xtr-service-contracts>=7.0,<8",
+    "xtr-service-contracts>=7.2,<8",
 ]
 
 # The injection markers double as dependency declarations for applications
