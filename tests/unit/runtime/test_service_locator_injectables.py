@@ -178,6 +178,18 @@ def test_a_requested_type_is_found_through_injected_and_a_union() -> None:
     assert ServiceLocator[Other] in provided
 
 
+def test_a_type_a_class_requests_on_its_call_yields_an_empty_locator() -> None:
+    class Command:
+        def __call__(self, locator: Injected[ServiceLocator[Absent]]) -> None:
+            del locator
+
+    injectable = _by_return(service_locator_injectables([_class_definition(Command)]))[
+        ServiceLocator[Absent]
+    ]
+
+    assert _keys(injectable) == []
+
+
 def test_a_provider_whose_signature_cannot_be_evaluated_is_skipped() -> None:
     def unresolvable(unknown: OnlyAtTypeCheck) -> None:
         del unknown

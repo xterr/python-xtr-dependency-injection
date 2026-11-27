@@ -115,26 +115,37 @@ def _requested_types(definitions: Sequence[Definition]) -> Iterator[type]:
     """Yield every ``T`` a definition's provider declares a ``ServiceLocator[T]`` parameter of.
 
     Only class and factory providers carry a signature to read; an instance has
-    none. A signature that cannot be evaluated (an annotation not importable at
-    runtime) is skipped: that definition fails elsewhere with a clearer error.
+    none. A class's ``__call__`` is read too: a command or a handler bound to the
+    container is filled through it, so what it asks for must be provided even
+    when nothing is registered under that type. A signature that cannot be
+    evaluated (an annotation not importable at runtime) is skipped: that
+    definition fails elsewhere with a clearer error.
     """
     for definition in definitions:
-        provider = _provider_callable(definition)
-        if provider is None:
-            continue
-        try:
-            signature = evaluated_signature(provider)
-        except NameError, TypeError, ValueError:
-            continue
-        for parameter in signature.parameters.values():
-            yield from _service_locator_arguments(cast("object", parameter.annotation))
+        for provider in _provider_callables(definition):
+            try:
+                signature = evaluated_signature(provider)
+            except NameError, TypeError, ValueError:
+                continue
+            for parameter in signature.parameters.values():
+                yield from _service_locator_arguments(cast("object", parameter.annotation))
 
 
-def _provider_callable(definition: Definition) -> Callable[..., object] | type | None:
-    """Return the class or factory whose signature to read, or ``None`` for an instance."""
+def _provider_callables(definition: Definition) -> tuple[Callable[..., object] | type, ...]:
+    """Return the class or factory whose signature to read, and a class's ``__call__``.
+
+    An instance has none.
+    """
     if definition.kind == "instance":
-        return None
-    return cast("Callable[..., object] | type", definition.provider)
+        return ()
+    provider = cast("Callable[..., object] | type", definition.provider)
+    if definition.kind != "class" or not isinstance(provider, type):
+        return (provider,)
+    call = next(
+        (vars(klass)["__call__"] for klass in provider.__mro__[:-1] if "__call__" in vars(klass)),
+        None,
+    )
+    return (provider,) if call is None else (provider, cast("Callable[..., object]", call))
 
 
 def _service_locator_arguments(annotation: object) -> Iterator[type]:
